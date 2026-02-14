@@ -1,0 +1,15 @@
+# Build outputs
+bin/
+obj/
+
+# tModLoader build artifacts
+*.tmod
+
+# IDE
+.vs/
+*.user
+*.suo
+
+# OS files
+.DS_Store
+Thumbs.db
