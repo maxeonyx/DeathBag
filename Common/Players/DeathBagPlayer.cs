@@ -5,6 +5,7 @@ using Terraria;
 using Terraria.DataStructures;
 using Terraria.ID;
 using Terraria.ModLoader;
+using DB = DeathBag.DeathBag;
 using DeathBag.Common.NPCs;
 
 namespace DeathBag.Common.Players;
@@ -77,8 +78,17 @@ public sealed class DeathBagPlayer : ModPlayer
             if (npcIndex < Main.maxNPCs && Main.npc[npcIndex].active)
             {
                 Mod.Logger.Info($"[DeathBag] Removing bag NPC (index {npcIndex}) on deferred tick");
-                Main.npc[npcIndex].active = false;
-                Main.npc[npcIndex].netUpdate = true;
+
+                if (Main.netMode == NetmodeID.MultiplayerClient)
+                {
+                    // Tell server to remove the NPC
+                    DB.SendBagRemoved(Mod, npcIndex);
+                }
+                else
+                {
+                    // Singleplayer: remove directly
+                    Main.npc[npcIndex].active = false;
+                }
             }
         }
     }
@@ -336,9 +346,15 @@ public sealed class DeathBagPlayer : ModPlayer
 
     private void SpawnBagNPC(Vector2 position, List<(int SlotIndex, Item Item)> inventory)
     {
-        if (Main.netMode == NetmodeID.Server)
+        if (Main.netMode == NetmodeID.MultiplayerClient)
+        {
+            // Send packet to server — server spawns the NPC and syncs to all clients
+            DB.SendBagCreated(Mod, position.X, position.Y, Player.name, Player.whoAmI, inventory);
+            Mod.Logger.Info($"[DeathBag] Sent BagCreated packet for {Player.name} with {inventory.Count} items");
             return;
+        }
 
+        // Singleplayer or server (host-and-play): spawn directly
         int npcIndex = NPC.NewNPC(
             Player.GetSource_Death(),
             (int)position.X,
@@ -358,6 +374,7 @@ public sealed class DeathBagPlayer : ModPlayer
             bagNPC.OwnerName = Player.name;
             bagNPC.SavedInventory = inventory;
             npc.GivenName = $"{Player.name}'s Death Bag";
+            npc.netUpdate = true;
             Mod.Logger.Info($"[DeathBag] Bag NPC spawned (index {npcIndex}) for {Player.name} with {inventory.Count} items");
         }
         else

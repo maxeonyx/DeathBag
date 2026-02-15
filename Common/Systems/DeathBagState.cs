@@ -48,8 +48,23 @@ public sealed class DeathBagState : ModSystem
         tag["deathBags"] = bagList;
     }
 
+    /// <summary>
+    /// Loaded bag data, held until players join so we can resolve owner names to indices.
+    /// NPC spawning is deferred to PostWorldGen or when players are available.
+    /// </summary>
+    private static readonly List<SavedBagData> _pendingBags = new();
+
+    internal class SavedBagData
+    {
+        public float X, Y;
+        public string OwnerName = "";
+        public List<(int SlotIndex, Item Item)> Inventory = new();
+    }
+
     public override void LoadWorldData(TagCompound tag)
     {
+        _pendingBags.Clear();
+
         if (!tag.ContainsKey("deathBags"))
             return;
 
@@ -57,14 +72,46 @@ public sealed class DeathBagState : ModSystem
 
         foreach (TagCompound bagTag in bagList)
         {
-            float x = bagTag.GetFloat("x");
-            float y = bagTag.GetFloat("y");
-            int ownerIndex = bagTag.GetInt("ownerIndex");
-            string ownerName = bagTag.GetString("ownerName");
+            var data = new SavedBagData
+            {
+                X = bagTag.GetFloat("x"),
+                Y = bagTag.GetFloat("y"),
+                OwnerName = bagTag.GetString("ownerName"),
+            };
 
+            if (bagTag.ContainsKey("items"))
+            {
+                var itemList = bagTag.GetList<TagCompound>("items");
+                foreach (TagCompound itemTag in itemList)
+                {
+                    int slot = itemTag.GetInt("slot");
+                    Item item = ItemIO.Load(itemTag.GetCompound("item"));
+                    data.Inventory.Add((slot, item));
+                }
+            }
+
+            _pendingBags.Add(data);
+        }
+    }
+
+    /// <summary>
+    /// Spawns bag NPCs from loaded data. Runs each tick until all bags are spawned.
+    /// Deferred because LoadWorldData runs before players are connected.
+    /// </summary>
+    public override void PostUpdateWorld()
+    {
+        if (_pendingBags.Count == 0)
+            return;
+
+        // Only spawn on server/singleplayer
+        if (Main.netMode == NetmodeID.MultiplayerClient)
+            return;
+
+        foreach (var data in _pendingBags)
+        {
             int npcIndex = NPC.NewNPC(
                 Terraria.Entity.GetSource_NaturalSpawn(),
-                (int)x, (int)y,
+                (int)data.X, (int)data.Y,
                 ModContent.NPCType<DeathBagNPC>());
 
             if (npcIndex < 0 || npcIndex >= Main.maxNPCs)
@@ -74,21 +121,28 @@ public sealed class DeathBagState : ModSystem
             if (npc.ModNPC is not DeathBagNPC bagNPC)
                 continue;
 
-            bagNPC.OwnerPlayerIndex = ownerIndex;
-            bagNPC.OwnerName = ownerName;
-
-            // Deserialize inventory
-            if (bagTag.ContainsKey("items"))
-            {
-                var itemList = bagTag.GetList<TagCompound>("items");
-                foreach (TagCompound itemTag in itemList)
-                {
-                    int slot = itemTag.GetInt("slot");
-                    Item item = ItemIO.Load(itemTag.GetCompound("item"));
-                    bagNPC.SavedInventory.Add((slot, item));
-                }
-            }
+            bagNPC.OwnerName = data.OwnerName;
+            bagNPC.OwnerPlayerIndex = ResolvePlayerIndex(data.OwnerName);
+            bagNPC.SavedInventory = data.Inventory;
+            npc.GivenName = $"{data.OwnerName}'s Death Bag";
+            npc.netUpdate = true;
         }
+
+        _pendingBags.Clear();
+    }
+
+    /// <summary>
+    /// Find the current player index for a player name. Returns -1 if not found (offline).
+    /// </summary>
+    private static int ResolvePlayerIndex(string playerName)
+    {
+        for (int i = 0; i < Main.maxPlayers; i++)
+        {
+            var p = Main.player[i];
+            if (p?.active == true && p.name == playerName)
+                return i;
+        }
+        return -1;
     }
 
     public override void OnWorldLoad()

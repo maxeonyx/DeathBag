@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Terraria;
 using Terraria.ID;
 using Terraria.ModLoader;
 using Terraria.UI.Chat;
+using DB = DeathBag.DeathBag;
 
 namespace DeathBag.Common.NPCs;
 
@@ -72,6 +74,9 @@ public sealed class DeathBagNPC : ModNPC
         NPC.velocity.X = 0f;
         PushApartFromOtherBags();
 
+        // Continuously resolve owner index from name (handles join/leave, index changes)
+        ResolveOwnerIndex();
+
         // Client-side only: handle magnet pull for owner, hover for others
         if (Main.netMode == NetmodeID.Server)
             return;
@@ -79,7 +84,7 @@ public sealed class DeathBagNPC : ModNPC
         _mouseHovering = false;
 
         Player localPlayer = Main.LocalPlayer;
-        bool isOwner = localPlayer.whoAmI == OwnerPlayerIndex;
+        bool isOwner = OwnerPlayerIndex >= 0 && localPlayer.whoAmI == OwnerPlayerIndex;
         float dist = Vector2.Distance(localPlayer.Center, NPC.Center);
 
         // === OWNER: item-like magnet pull + auto-restore on contact ===
@@ -132,19 +137,29 @@ public sealed class DeathBagNPC : ModNPC
         if (isOwner)
             Main.instance.MouseText($"{OwnerName}'s Bag");
         else
-            Main.instance.MouseText($"{OwnerName}'s Bag [Right-click to deliver]");
+        {
+            string label = string.IsNullOrEmpty(OwnerName) ? "Unknown Player's Bag" : $"{OwnerName}'s Bag";
+            if (OwnerPlayerIndex >= 0)
+                label += " [Right-click to deliver]";
+            Main.instance.MouseText(label);
+        }
     }
 
     // Non-owners can right-click to open chat UI for confirmation
     public override bool CanChat()
     {
         Player localPlayer = Main.LocalPlayer;
-        return localPlayer.whoAmI != OwnerPlayerIndex;
+        // Owner picks up automatically — no chat needed
+        if (OwnerPlayerIndex >= 0 && localPlayer.whoAmI == OwnerPlayerIndex)
+            return false;
+        // Non-owners can chat to deliver (only if owner is online)
+        return OwnerPlayerIndex >= 0;
     }
 
     public override string GetChat()
     {
-        return $"Deliver {OwnerName}'s bag to them?";
+        string name = string.IsNullOrEmpty(OwnerName) ? "Unknown Player" : OwnerName;
+        return $"Deliver {name}'s bag to them?";
     }
 
     public override void SetChatButtons(ref string button1, ref string button2)
@@ -195,6 +210,23 @@ public sealed class DeathBagNPC : ModNPC
         return false;
     }
 
+    public override void SendExtraAI(BinaryWriter writer)
+    {
+        writer.Write(OwnerName ?? "");
+        writer.Write(OwnerPlayerIndex);
+        DB.WriteInventory(writer, SavedInventory);
+    }
+
+    public override void ReceiveExtraAI(BinaryReader reader)
+    {
+        OwnerName = reader.ReadString();
+        OwnerPlayerIndex = reader.ReadInt32();
+        SavedInventory = DB.ReadInventory(reader);
+
+        if (!string.IsNullOrEmpty(OwnerName))
+            NPC.GivenName = $"{OwnerName}'s Death Bag";
+    }
+
     public override void PostDraw(SpriteBatch spriteBatch, Vector2 screenPos, Color drawColor)
     {
         // Draw owner name above the bag when hovering
@@ -215,6 +247,33 @@ public sealed class DeathBagNPC : ModNPC
             0f,
             Vector2.Zero,
             Vector2.One);
+    }
+
+    private void ResolveOwnerIndex()
+    {
+        // If we have a name, try to find the matching player
+        if (string.IsNullOrEmpty(OwnerName))
+            return;
+
+        // Check if current index is still valid
+        if (OwnerPlayerIndex >= 0 && OwnerPlayerIndex < Main.maxPlayers)
+        {
+            var p = Main.player[OwnerPlayerIndex];
+            if (p?.active == true && p.name == OwnerName)
+                return; // Still valid
+        }
+
+        // Search for player by name
+        OwnerPlayerIndex = -1;
+        for (int i = 0; i < Main.maxPlayers; i++)
+        {
+            var p = Main.player[i];
+            if (p?.active == true && p.name == OwnerName)
+            {
+                OwnerPlayerIndex = i;
+                return;
+            }
+        }
     }
 
     private void PushApartFromOtherBags()
