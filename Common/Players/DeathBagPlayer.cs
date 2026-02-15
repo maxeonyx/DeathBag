@@ -29,6 +29,14 @@ public sealed class DeathBagPlayer : ModPlayer
     /// </summary>
     private int _pendingBagRemoval = -1;
 
+    /// <summary>Copper starter tools — never worth bagging.</summary>
+    private static readonly HashSet<int> CopperTools = new()
+    {
+        ItemID.CopperShortsword,
+        ItemID.CopperPickaxe,
+        ItemID.CopperAxe,
+    };
+
     public override bool PreKill(double damage, int hitDirection, bool pvp, ref bool playSound,
         ref bool genDust, ref PlayerDeathReason damageSource)
     {
@@ -42,19 +50,27 @@ public sealed class DeathBagPlayer : ModPlayer
         _deathSnapshot = SnapshotInventory();
         _deathLoadoutIndex = Player.CurrentLoadoutIndex;
 
-        Mod.Logger.Info($"[DeathBag] PreKill: snapshotted {_deathSnapshot.Count} items for {Player.name}");
+        // Filter out copper tools and bag items — these are never worth bagging
+        _deathSnapshot.RemoveAll(entry =>
+            CopperTools.Contains(entry.Item.type) || entry.Item.ModItem is Items.DeathBagItem);
 
-        if (_deathSnapshot.Count == 0)
+        Mod.Logger.Info($"[DeathBag] PreKill: snapshotted {_deathSnapshot.Count} items for {Player.name} (after filtering copper tools + bag items)");
+
+        // If only coins remain, let vanilla scatter them — not worth a bag
+        bool onlyCoins = _deathSnapshot.Count > 0 && _deathSnapshot.TrueForAll(entry => entry.Item.IsACoin);
+        if (_deathSnapshot.Count == 0 || onlyCoins)
         {
-            Mod.Logger.Info("[DeathBag] PreKill: empty inventory, no bag will spawn");
+            if (onlyCoins)
+                Mod.Logger.Info("[DeathBag] PreKill: only coins, letting vanilla drop them");
+            else
+                Mod.Logger.Info("[DeathBag] PreKill: empty inventory, no bag will spawn");
             _deathSnapshot = null;
             return true;
         }
 
         // Clear inventory so vanilla's DropItems finds nothing to scatter —
-        // EXCEPT DeathBagItems (carried bags), which vanilla will drop naturally.
-        // DeathBagItem.Update() converts them back to bag NPCs on the ground.
-        ClearInventory(preserveBagItems: true);
+        // EXCEPT DeathBagItems (carried bags) and copper tools, which vanilla will drop naturally.
+        ClearInventory(preserveBagItems: true, preserveCopperTools: true);
 
         return true;
     }
@@ -69,16 +85,11 @@ public sealed class DeathBagPlayer : ModPlayer
         var snapshot = _deathSnapshot;
         _deathSnapshot = null;
 
-        // Remove any carried DeathBagItems from the snapshot — they'll be dropped
-        // by vanilla Mediumcore scatter, and DeathBagItem.Update() will convert
-        // them back to bag NPCs on the ground.
-        snapshot.RemoveAll(entry => entry.Item.ModItem is Items.DeathBagItem);
-
         // Spawn carrier's own bag (if anything remains)
         if (snapshot.Count > 0)
         {
             Mod.Logger.Info($"[DeathBag] Kill: spawning bag with {snapshot.Count} items at ({Player.Center.X:F0}, {Player.Center.Y:F0}), loadout {_deathLoadoutIndex}");
-            SpawnBagNPC(Player.Center, snapshot, _deathLoadoutIndex);
+            SpawnBagNPC(Player.Center, snapshot, _deathLoadoutIndex, BagKind.Death);
         }
     }
 
@@ -110,8 +121,10 @@ public sealed class DeathBagPlayer : ModPlayer
     }
 
     /// <summary>
-    /// Restores inventory from a bag using plan-then-execute pattern.
-    /// Called from DeathBagNPC.AI() on right-click by the owning client.
+    /// Restores inventory from a bag. Three phases:
+    /// 1. Gather: read bag contents + current player state into dictionaries
+    /// 2. Compute: bag items claim their slots, displaced items re-absorb into inventory
+    /// 3. Apply: write only changed slots, drop overflow
     /// </summary>
     public void RestoreFromBag(DeathBagNPC bag)
     {
@@ -124,173 +137,77 @@ public sealed class DeathBagPlayer : ModPlayer
         Mod.Logger.Info($"[DeathBag] RestoreFromBag: restoring {bag.SavedInventory.Count} saved items for {Player.name}");
 
         // Switch to the loadout that was active at death, so slot indices map to the correct arrays.
-        // TrySwitchingLoadout is a no-op if already on the correct loadout.
         if (Player.CurrentLoadoutIndex != bag.DeathLoadoutIndex)
         {
             Mod.Logger.Info($"[DeathBag] Switching loadout {Player.CurrentLoadoutIndex} -> {bag.DeathLoadoutIndex} to match death state");
             Player.TrySwitchingLoadout(bag.DeathLoadoutIndex);
         }
 
-        // === PLAN PHASE (no mutations) ===
+        // === 1. GATHER (read-only) ===
 
-        // Build result map: unified slot index -> item
-        // Saved items reclaim their exact slots; equipment slots (59+) are never
-        // used for re-absorption overflow — only inventory slots (0-58) absorb.
-        var result = new Dictionary<int, Item>();
-
+        // Bag contents: slot -> item
+        var bagItems = new Dictionary<int, Item>();
         foreach (var (slotIndex, savedItem) in bag.SavedInventory)
+            bagItems[slotIndex] = savedItem.Clone();
+
+        // Current player state: slot -> item (all slots, including empty)
+        var current = new Dictionary<int, Item>();
+        void GatherArray(Item[] array, int baseSlot)
         {
-            result[slotIndex] = savedItem.Clone();
+            for (int idx = 0; idx < array.Length; idx++)
+                current[baseSlot + idx] = array[idx]?.Clone() ?? new Item();
         }
-        Mod.Logger.Info($"[DeathBag] Step 1: {result.Count} saved items reclaim their slots");
-
-        // Collect current items from ALL arrays that need re-absorption
-        var currentItems = new List<Item>();
-
-        void CollectCurrent(Item[] array, int baseSlot, string label)
-        {
-            for (int i = 0; i < array.Length; i++)
-            {
-                Item item = array[i];
-                if (item is not null && !item.IsAir)
-                {
-                    currentItems.Add(item.Clone());
-                    Mod.Logger.Debug($"[DeathBag] Collect {label}[{i}] (slot {baseSlot + i}): {item.Name} x{item.stack}");
-                }
-            }
-        }
-
-        CollectCurrent(Player.inventory, 0, "inventory");
-        CollectCurrent(Player.armor, SlotArmor, "armor");
-        CollectCurrent(Player.dye, SlotDye, "dye");
-        CollectCurrent(Player.miscEquips, SlotMiscEquips, "miscEquips");
-        CollectCurrent(Player.miscDyes, SlotMiscDyes, "miscDyes");
-
+        GatherArray(Player.inventory, 0);
+        GatherArray(Player.armor, SlotArmor);
+        GatherArray(Player.dye, SlotDye);
+        GatherArray(Player.miscEquips, SlotMiscEquips);
+        GatherArray(Player.miscDyes, SlotMiscDyes);
         for (int l = 0; l < Player.Loadouts.Length; l++)
         {
             if (l == Player.CurrentLoadoutIndex)
                 continue;
             int loadoutBase = SlotLoadoutsStart + l * LoadoutSize;
-            CollectCurrent(Player.Loadouts[l].Armor, loadoutBase, $"loadout{l}.Armor");
-            CollectCurrent(Player.Loadouts[l].Dye, loadoutBase + 20, $"loadout{l}.Dye");
+            GatherArray(Player.Loadouts[l].Armor, loadoutBase);
+            GatherArray(Player.Loadouts[l].Dye, loadoutBase + 20);
         }
 
-        Mod.Logger.Info($"[DeathBag] Step 2: {currentItems.Count} current items to re-absorb");
+        Mod.Logger.Info($"[DeathBag] Gather: {bagItems.Count} bag items, {current.Count} current slots");
 
-        // Deduplicate copper starter tools — these respawn on death and pile up.
-        // If the saved inventory already has one, discard the current copy.
-        var copperTools = new HashSet<int>
+        // === 2. COMPUTE (pure — builds result + overflow from gathered data) ===
+
+        var (result, toDrop) = ComputeRestore(bagItems, current);
+
+        // === 3. APPLY (single tick — only write changed slots) ===
+
+        Mod.Logger.Info($"[DeathBag] Applying: {result.Count} changed slots, {toDrop.Count} overflow items");
+
+        void ApplyArray(Item[] array, int baseSlot)
         {
-            ItemID.CopperShortsword,
-            ItemID.CopperPickaxe,
-            ItemID.CopperAxe,
-        };
-
-        var savedTypes = new HashSet<int>();
-        foreach (var (_, savedItem) in bag.SavedInventory)
-            savedTypes.Add(savedItem.type);
-
-        currentItems.RemoveAll(item =>
-        {
-            if (copperTools.Contains(item.type) && savedTypes.Contains(item.type))
+            for (int idx = 0; idx < array.Length; idx++)
             {
-                Mod.Logger.Info($"[DeathBag] Dedup: discarding extra {item.Name}");
-                return true;
-            }
-            return false;
-        });
-
-        // Re-absorb current items into inventory slots (0-58) only.
-        // Equipment slots are exact-position — we don't stuff adventure pickups into armor slots.
-        int invSlots = Player.inventory.Length; // 59
-        var toDrop = new List<Item>();
-
-        foreach (Item current in currentItems)
-        {
-            int remaining = current.stack;
-
-            // Try stacking onto matching items already in inventory result slots
-            for (int i = 0; i < invSlots && remaining > 0; i++)
-            {
-                if (!result.TryGetValue(i, out Item target) || target.IsAir)
-                    continue;
-                if (target.type != current.type || target.stack >= target.maxStack)
-                    continue;
-
-                int canAdd = Math.Min(remaining, target.maxStack - target.stack);
-                target.stack += canAdd;
-                remaining -= canAdd;
-            }
-
-            // Try placing in empty inventory slots, respecting slot type restrictions:
-            // Slots 50-53: ammo only (item.ammo != 0 || item.bait != 0)
-            // Slots 54-57: coins only (item.IsACoin)
-            // Slots 0-49, 58: anything
-            for (int i = 0; i < invSlots && remaining > 0; i++)
-            {
-                if (result.ContainsKey(i))
-                    continue;
-
-                bool slotAccepts;
-                if (i >= 54 && i <= 57)
-                    slotAccepts = current.IsACoin;
-                else if (i >= 50 && i <= 53)
-                    slotAccepts = current.ammo != 0 || current.bait > 0;
-                else
-                    slotAccepts = true;
-
-                if (!slotAccepts)
-                    continue;
-
-                Item placed = current.Clone();
-                placed.stack = remaining;
-                result[i] = placed;
-                remaining = 0;
-            }
-
-            if (remaining > 0)
-            {
-                Item overflow = current.Clone();
-                overflow.stack = remaining;
-                toDrop.Add(overflow);
-                Mod.Logger.Info($"[DeathBag] Overflow: {overflow.Name} x{remaining}");
+                int slot = baseSlot + idx;
+                if (result.TryGetValue(slot, out Item item))
+                    array[idx] = item;
+                // else: slot not in result — leave it untouched
             }
         }
-
-        // === EXECUTE PHASE (single tick) ===
-
-        Mod.Logger.Info($"[DeathBag] Executing restore: {result.Count} slots filled, {toDrop.Count} overflow items");
-
-        // Write results back to the correct arrays
-        void WriteBack(Item[] array, int baseSlot)
-        {
-            for (int i = 0; i < array.Length; i++)
-            {
-                int slot = baseSlot + i;
-                array[i] = result.TryGetValue(slot, out Item item) ? item : new Item();
-            }
-        }
-
-        WriteBack(Player.inventory, 0);
-        WriteBack(Player.armor, SlotArmor);
-        WriteBack(Player.dye, SlotDye);
-        WriteBack(Player.miscEquips, SlotMiscEquips);
-        WriteBack(Player.miscDyes, SlotMiscDyes);
-
+        ApplyArray(Player.inventory, 0);
+        ApplyArray(Player.armor, SlotArmor);
+        ApplyArray(Player.dye, SlotDye);
+        ApplyArray(Player.miscEquips, SlotMiscEquips);
+        ApplyArray(Player.miscDyes, SlotMiscDyes);
         for (int l = 0; l < Player.Loadouts.Length; l++)
         {
             if (l == Player.CurrentLoadoutIndex)
                 continue;
             int loadoutBase = SlotLoadoutsStart + l * LoadoutSize;
-            WriteBack(Player.Loadouts[l].Armor, loadoutBase);
-            WriteBack(Player.Loadouts[l].Dye, loadoutBase + 20);
+            ApplyArray(Player.Loadouts[l].Armor, loadoutBase);
+            ApplyArray(Player.Loadouts[l].Dye, loadoutBase + 20);
         }
 
         // Drop overflow items
         foreach (Item drop in toDrop)
-        {
             Player.QuickSpawnItem(Player.GetSource_Misc("DeathBagOverflow"), drop, drop.stack);
-        }
 
         // Defer NPC removal to next tick (removing mid-frame can crash)
         _pendingBagRemoval = bag.NPC.whoAmI;
@@ -298,23 +215,119 @@ public sealed class DeathBagPlayer : ModPlayer
         // Mark bag as consumed immediately so AI() can't trigger a second restore
         bag.SavedInventory.Clear();
 
-        // Sync all equipment slots to server
+        // Sync only changed slots to server
         if (Main.netMode == NetmodeID.MultiplayerClient)
         {
-            // Highest possible slot: loadout 2 dye end = 99 + 2*30 + 10 = 189
-            int maxSlot = SlotLoadoutsStart + Player.Loadouts.Length * LoadoutSize;
-            for (int i = 0; i < maxSlot; i++)
-            {
-                NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, Player.whoAmI, i);
-            }
+            foreach (int slot in result.Keys)
+                NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, Player.whoAmI, slot);
         }
 
         Main.NewText("Inventory restored!", Color.Green);
         if (!string.IsNullOrEmpty(bag.DeliveredBy))
-        {
             Main.NewText($"Delivered by {bag.DeliveredBy}!", Color.LightGreen);
-        }
         Mod.Logger.Info("[DeathBag] Restore complete");
+    }
+
+    /// <summary>
+    /// Pure computation: given bag items and current player state, compute which slots
+    /// change and what overflows.
+    ///
+    /// Algorithm:
+    /// 1. Bag items claim their exact slots. Any current item in a contested slot is displaced.
+    /// 2. Displaced items are re-absorbed: stack onto existing items, then fill empty inventory slots.
+    /// 3. Anything that can't fit overflows.
+    ///
+    /// Returns only the slots that change — untouched slots are not in the result.
+    /// </summary>
+    private (Dictionary<int, Item> ChangedSlots, List<Item> Overflow) ComputeRestore(
+        Dictionary<int, Item> bagItems,
+        Dictionary<int, Item> current)
+    {
+        var changed = new Dictionary<int, Item>();
+        var displaced = new List<Item>();
+
+        // Step 1: bag items claim their slots, displacing current occupants
+        foreach (var (slot, bagItem) in bagItems)
+        {
+            if (current.TryGetValue(slot, out Item currentItem) && currentItem is not null && !currentItem.IsAir)
+                displaced.Add(currentItem);
+
+            changed[slot] = bagItem;
+        }
+
+        Mod.Logger.Info($"[DeathBag] Compute: {changed.Count} bag items placed, {displaced.Count} displaced items");
+
+        // Step 2: re-absorb displaced items into inventory slots (0-58) only
+        int invSlots = 59;
+        var overflow = new List<Item>();
+
+        foreach (Item item in displaced)
+        {
+            int remaining = item.stack;
+
+            // Try stacking onto matching items in inventory range (bag items or existing)
+            for (int s = 0; s < invSlots && remaining > 0; s++)
+            {
+                // Check changed slots first, then fall back to current
+                Item target;
+                if (changed.TryGetValue(s, out Item changedItem))
+                    target = changedItem;
+                else if (current.TryGetValue(s, out Item currentItem))
+                    target = currentItem;
+                else
+                    continue;
+
+                if (target is null || target.IsAir)
+                    continue;
+                if (target.type != item.type || target.stack >= target.maxStack)
+                    continue;
+
+                int canAdd = Math.Min(remaining, target.maxStack - target.stack);
+                target.stack += canAdd;
+                remaining -= canAdd;
+
+                // If we modified a current slot (not already in changed), mark it changed
+                if (!changed.ContainsKey(s))
+                    changed[s] = target;
+            }
+
+            // Try placing in empty inventory slots
+            for (int s = 0; s < invSlots && remaining > 0; s++)
+            {
+                // Slot is occupied if it's in changed or (not in changed and non-empty in current)
+                if (changed.ContainsKey(s))
+                    continue;
+                if (current.TryGetValue(s, out Item cur) && cur is not null && !cur.IsAir)
+                    continue;
+
+                // Respect slot type restrictions
+                bool slotAccepts;
+                if (s >= 54 && s <= 57)
+                    slotAccepts = item.IsACoin;
+                else if (s >= 50 && s <= 53)
+                    slotAccepts = item.ammo != 0 || item.bait > 0;
+                else
+                    slotAccepts = true;
+
+                if (!slotAccepts)
+                    continue;
+
+                Item placed = item.Clone();
+                placed.stack = remaining;
+                changed[s] = placed;
+                remaining = 0;
+            }
+
+            if (remaining > 0)
+            {
+                Item ovf = item.Clone();
+                ovf.stack = remaining;
+                overflow.Add(ovf);
+                Mod.Logger.Info($"[DeathBag] Overflow: {ovf.Name} x{remaining}");
+            }
+        }
+
+        return (changed, overflow);
     }
 
     /// <summary>
@@ -334,7 +347,7 @@ public sealed class DeathBagPlayer : ModPlayer
     private const int SlotLoadoutsStart = 99;
     private const int LoadoutSize = 30; // 20 armor + 10 dye per loadout
 
-    private List<(int SlotIndex, Item Item)> SnapshotInventory()
+    internal List<(int SlotIndex, Item Item)> SnapshotInventory()
     {
         var snapshot = new List<(int, Item)>();
 
@@ -372,13 +385,15 @@ public sealed class DeathBagPlayer : ModPlayer
         return snapshot;
     }
 
-    private void ClearInventory(bool preserveBagItems = false)
+    private void ClearInventory(bool preserveBagItems = false, bool preserveCopperTools = false)
     {
         void Clear(Item[] array)
         {
             for (int i = 0; i < array.Length; i++)
             {
                 if (preserveBagItems && array[i]?.ModItem is Items.DeathBagItem)
+                    continue;
+                if (preserveCopperTools && array[i] is not null && CopperTools.Contains(array[i].type))
                     continue;
                 array[i] = new Item();
             }
@@ -400,16 +415,16 @@ public sealed class DeathBagPlayer : ModPlayer
         }
     }
 
-    private void SpawnBagNPC(Vector2 position, List<(int SlotIndex, Item Item)> inventory, int deathLoadoutIndex,
-        string? ownerNameOverride = null)
+    internal void SpawnBagNPC(Vector2 position, List<(int SlotIndex, Item Item)> inventory, int deathLoadoutIndex,
+        BagKind kind, string? ownerNameOverride = null)
     {
         string ownerName = ownerNameOverride ?? Player.name;
 
         if (Main.netMode == NetmodeID.MultiplayerClient)
         {
             // Send packet to server — server spawns the NPC and syncs to all clients
-            DB.SendBagCreated(Mod, position.X, position.Y, ownerName, Player.whoAmI, deathLoadoutIndex, inventory);
-            Mod.Logger.Info($"[DeathBag] Sent BagCreated packet for {ownerName} with {inventory.Count} items");
+            DB.SendBagCreated(Mod, kind, position.X, position.Y, ownerName, Player.whoAmI, deathLoadoutIndex, inventory);
+            Mod.Logger.Info($"[DeathBag] Sent BagCreated packet for {ownerName} with {inventory.Count} items, kind={kind}");
             return;
         }
 
@@ -429,14 +444,14 @@ public sealed class DeathBagPlayer : ModPlayer
         NPC npc = Main.npc[npcIndex];
         if (npc.ModNPC is DeathBagNPC bagNPC)
         {
+            bagNPC.Kind = kind;
             bagNPC.OwnerPlayerIndex = -1; // Will be resolved by ResolveOwnerIndex
             bagNPC.OwnerName = ownerName;
             bagNPC.DeathLoadoutIndex = deathLoadoutIndex;
             bagNPC.SavedInventory = inventory;
-            npc.GivenName = $"{ownerName}'s Death Bag";
             npc.netUpdate = true;
             bagNPC.ResolveOwnerIndex();
-            Mod.Logger.Info($"[DeathBag] Bag NPC spawned (index {npcIndex}) for {ownerName} with {inventory.Count} items, loadout {deathLoadoutIndex}");
+            Mod.Logger.Info($"[DeathBag] Bag NPC spawned (index {npcIndex}) for {ownerName} with {inventory.Count} items, kind={kind}, loadout {deathLoadoutIndex}");
         }
         else
         {

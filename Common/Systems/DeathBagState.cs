@@ -25,6 +25,7 @@ public sealed class DeathBagState : ModSystem
 
             var bagTag = new TagCompound
             {
+                ["kind"] = (byte)bag.Kind,
                 ["x"] = npc.position.X,
                 ["y"] = npc.position.Y,
                 ["ownerIndex"] = bag.OwnerPlayerIndex,
@@ -58,6 +59,7 @@ public sealed class DeathBagState : ModSystem
 
     internal class SavedBagData
     {
+        public BagKind Kind = BagKind.Death;
         public float X, Y;
         public string OwnerName = "";
         public int DeathLoadoutIndex;
@@ -77,6 +79,7 @@ public sealed class DeathBagState : ModSystem
         {
             var data = new SavedBagData
             {
+                Kind = bagTag.ContainsKey("kind") ? (BagKind)bagTag.GetByte("kind") : BagKind.Death,
                 X = bagTag.GetFloat("x"),
                 Y = bagTag.GetFloat("y"),
                 OwnerName = bagTag.GetString("ownerName"),
@@ -125,11 +128,11 @@ public sealed class DeathBagState : ModSystem
             if (npc.ModNPC is not DeathBagNPC bagNPC)
                 continue;
 
+            bagNPC.Kind = data.Kind;
             bagNPC.OwnerName = data.OwnerName;
             bagNPC.OwnerPlayerIndex = ResolvePlayerIndex(data.OwnerName);
             bagNPC.SavedInventory = data.Inventory;
             bagNPC.DeathLoadoutIndex = data.DeathLoadoutIndex;
-            npc.GivenName = $"{data.OwnerName}'s Death Bag";
             npc.netUpdate = true;
         }
 

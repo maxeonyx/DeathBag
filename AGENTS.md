@@ -62,3 +62,12 @@ Key components:
 3. **Commit after each feature** — small, working increments
 4. **Deploy and test in-game** after each feature: `& "$env:USERPROFILE\terraria-mods\deploy.ps1" -Mod DeathBag`
 5. **Update VISION.md** when you resolve open questions or discover new ones
+
+## State Migration (CRITICAL)
+
+**This mod is in use on a real world.** Any change to persisted state — `SaveWorldData`/`LoadWorldData` in `DeathBagState.cs`, `SaveData`/`LoadData` in `DeathBagItem.cs`, or `SendExtraAI`/`ReceiveExtraAI` in `DeathBagNPC.cs` — must handle migration from the previous format. Bags exist in the world save file and must not be lost on mod update.
+
+Rules:
+- **Never remove or rename a `TagCompound` key** without migration code that reads the old key
+- **New fields must have sensible defaults** when loaded from old saves that lack them (already done for `DeathLoadoutIndex` and `CarrierName`)
+- **Binary packet format changes** (`SendExtraAI`/`ReceiveExtraAI`, `WriteInventory`/`ReadInventory`) require version coordination — both server and all clients must be on the same mod version. Document breaking packet changes in commit messages.

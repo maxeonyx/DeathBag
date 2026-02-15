@@ -1,0 +1,9 @@
+Mods: {
+	DeathBag: {
+		Items: {
+			LoadoutStationItem: {
+				DisplayName: Loadout Station
+			}
+		}
+	}
+}

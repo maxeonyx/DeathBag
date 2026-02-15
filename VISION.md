@@ -66,15 +66,47 @@ Exact packet design TBD — depends on what entity type the bag ends up being.
 
 ### 8. Bag Visuals
 
-- Randomized visual elements per bag so you can tell them apart at a glance
-- Details left to implementation agent
-- Death bags and loadout bags (stretch) should be visually distinct
+- Death bags and loadout bags should be visually distinct (different color tint — loadout bags are blue-green)
+- Bags bob gently in place — visual only, hitbox stays fixed at the center of the bob motion
+- **Hitbox sizing:** 8 game-pixels larger than the rendered sprite in each direction (top, bottom, left, right). The sprite content is 16x21 texture pixels, which renders at 2x scale (32x42 game pixels), so the hitbox is 48x58. Centered on the sprite center.
+- **Drawing:** Both bag kinds use custom `PreDraw` that centers the texture on `NPC.Center + DrawOffsetY`. Vanilla's default NPC draw is NOT used (it doesn't center correctly with oversized hitboxes).
+- **Hover text:** Uses vanilla's `GivenName` system (same as Guide, Nurse, etc.) — do NOT use manual `MouseText` calls, they fight with vanilla's hover. `GivenName` is kept in sync via `UpdateGivenName()` in `AI()`.
+- **Hover text format:** "PlayerName's Death Bag" or "PlayerName's Loadout"
+
+### 9. Non-Owner Bag Pickup
+
+Non-owners can right-click any bag to pick it up as an inventory item (DeathBagItem). This works for both death bags and loadout bags:
+
+> "I'm imagining this. Immediately prior to death on a Medium Core character, my current inventory gets converted to a deathbag item in my inventory, and then Medium Core drops it. And then when it gets dropped, it converts to a deathbag NPC item entity."
+
+> "Can we however ideally use the default item pickup and default item dropping for the death bag items?"
+
+> "Actually I think maybe deathbags should never be items on the ground. Maybe we should always convert them to deathbag NPCs as you had before."
+
+When the carrier drops a bag item (right-click drop), it converts back to a normal bag NPC — identical to death-spawned or station-spawned bags, no special delivery logic.
 
 ## Stretch Goals
 
-### Loadout Bag Station
+### Loadout Bag Station (CONFIRMED — building now)
 
-A craftable furniture item. Right-click it to dump your current inventory into a new bag (same entity as a death bag but with different styling). Useful for loadout management.
+> "You have a loadout station and you right click on it, it turns your current inventory, minus any death bags or loadout bags, into a loadout bag item in your inventory. You can then drop that in the world somewhere."
+
+> "Loadout bags, you have to right click on them to pick them up. They don't automatically pick up. And the player who owns them right clicks on them only, but the player who doesn't own them right clicks on them and has to go through the dialogue."
+
+A craftable furniture item (dungeon-tier recipe — mid game). Right-click it to snapshot your current inventory (excluding death bags and loadout bags) into a **DeathBagItem in the player's inventory** (not an NPC). The player can then drop the item in the world wherever they want — it converts to a loadout bag NPC on the ground (same as any dropped DeathBagItem).
+
+**Creation flow:** Station → DeathBagItem in inventory → player drops it → converts to loadout bag NPC.
+
+**Key differences from death bags:**
+- **Created as an inventory item** — player chooses where to place it by dropping
+- **No magnet pull, no auto-pickup** — owner must right-click the NPC to restore
+- **Owner right-click = instant restore** — no chat UI, no confirmation dialogue. Only non-owners see the chat UI confirmation.
+- **Different color** — visually distinct from death bags (blue-green tint)
+- **Created voluntarily** — not by dying
+- **Multiple allowed** — e.g. stash a "mining loadout" near the mine and a "building loadout" near base
+- **Same persistence** — survives server restarts, saved to world file
+
+Everything else is identical: same restore logic, same non-owner pickup flow, same push-apart physics.
 
 ### Lava Penalty + Lavaproof Bag
 

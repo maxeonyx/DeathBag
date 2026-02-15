@@ -12,12 +12,26 @@ using DB = DeathBag.DeathBag;
 namespace DeathBag.Common.NPCs;
 
 /// <summary>
-/// The bag entity that appears at the player's death location.
-/// Owner's bag: auto-pickup like an item (magnet pull + restore on contact).
-/// Other players' bags: right-click with chat UI confirmation.
+/// Whether this bag was created by death or by a loadout station.
+/// Controls magnet/auto-pickup behavior and color.
+/// </summary>
+public enum BagKind : byte
+{
+    Death = 0,
+    Loadout = 1,
+}
+
+/// <summary>
+/// Bag entity that floats in the world holding a player's inventory snapshot.
+/// Death bags: auto-pickup with magnet pull for owner.
+/// Loadout bags: owner must right-click (no magnet, no auto-pickup).
+/// Non-owners always right-click with chat UI confirmation.
 /// </summary>
 public sealed class DeathBagNPC : ModNPC
 {
+    /// <summary>Whether this is a death bag or loadout bag.</summary>
+    public BagKind Kind = BagKind.Death;
+
     /// <summary>Player index of the bag's owner.</summary>
     public int OwnerPlayerIndex = -1;
 
@@ -40,8 +54,11 @@ public sealed class DeathBagNPC : ModNPC
     /// </summary>
     public string DeliveredBy = "";
 
-    /// <summary>Whether the local player's mouse is currently over this NPC.</summary>
-    private bool _mouseHovering;
+    /// <summary>Visual-only bob offset (pixels). Applied in draw, not to NPC.position.</summary>
+    private float _bobOffset;
+
+    /// <summary>Whether the local player is hovering and in range — set in AI(), read in PostDraw.</summary>
+    private bool _showActionHint;
 
     // Item magnet constants (matches vanilla item pickup behavior)
     private const float MagnetRange = 224f;  // ~14 tiles — range at which bag starts pulling toward owner
@@ -63,8 +80,8 @@ public sealed class DeathBagNPC : ModNPC
     {
         NPC.friendly = true;
         NPC.townNPC = false;
-        NPC.width = 40;
-        NPC.height = 40;
+        NPC.width = 48;
+        NPC.height = 48;
         NPC.aiStyle = -1;
         NPC.damage = 0;
         NPC.defense = 0;
@@ -81,9 +98,10 @@ public sealed class DeathBagNPC : ModNPC
 
     public override void AI()
     {
-        // Gentle hover bob (position-based, not velocity-based, so friction doesn't interfere)
-        // Each bag gets a unique phase offset from whoAmI so they don't bob in sync
-        NPC.position.Y += (float)Math.Sin(Main.GameUpdateCount * 0.04f + NPC.whoAmI * 1.7f) * 0.3f;
+        // Visual-only bob — each bag gets a unique phase offset so they don't bob in sync
+        // DrawOffsetY = 0 centers sprite on hitbox center (used by our custom PreDraw)
+        _bobOffset = (float)Math.Sin(Main.GameUpdateCount * 0.04f + NPC.whoAmI * 1.7f) * 1.5f;
+        DrawOffsetY = _bobOffset;
 
         // Apply friction so bags settle after push-apart, but don't drift forever
         NPC.velocity *= 0.9f;
@@ -92,18 +110,21 @@ public sealed class DeathBagNPC : ModNPC
         // Continuously resolve owner index from name (handles join/leave, index changes)
         ResolveOwnerIndex();
 
-        // Client-side only: handle magnet pull for owner, hover for others
+        // Keep GivenName in sync (vanilla uses it for hover text)
+        UpdateGivenName();
+
+        // Client-side only: handle magnet pull for owner, owner right-click restore for loadout bags
         if (Main.netMode == NetmodeID.Server)
             return;
-
-        _mouseHovering = false;
 
         Player localPlayer = Main.LocalPlayer;
         bool isOwner = OwnerPlayerIndex >= 0 && localPlayer.whoAmI == OwnerPlayerIndex;
         float dist = Vector2.Distance(localPlayer.Center, NPC.Center);
 
-        // === OWNER: item-like magnet pull + auto-restore on contact ===
-        if (isOwner && !localPlayer.dead)
+        _showActionHint = false;
+
+        // === OWNER: death bags auto-pickup with magnet pull ===
+        if (isOwner && !localPlayer.dead && Kind == BagKind.Death)
         {
             if (dist < PickupRange)
             {
@@ -123,41 +144,47 @@ public sealed class DeathBagNPC : ModNPC
             }
         }
 
-        // === HOVER TEXT (both owner and non-owner) ===
-        Vector2 mouseWorld = Main.MouseWorld;
-        if (!NPC.Hitbox.Contains(mouseWorld.ToPoint()))
-            return;
-
-        if (dist > 192f)
-            return;
-
-        _mouseHovering = true;
-
-        if (isOwner)
-            Main.instance.MouseText($"{OwnerName}'s Bag");
-        else
+        // === OWNER: loadout bags — right-click to restore (no chat UI) ===
+        if (isOwner && !localPlayer.dead && Kind == BagKind.Loadout)
         {
-            string label = string.IsNullOrEmpty(OwnerName) ? "Unknown Player's Bag" : $"{OwnerName}'s Bag";
-            label += " [Right-click to pick up]";
-            Main.instance.MouseText(label);
+            Vector2 mouseWorld = Main.MouseWorld;
+            if (NPC.Hitbox.Contains(mouseWorld.ToPoint()) && dist <= 192f
+                && Main.mouseRight && Main.mouseRightRelease)
+            {
+                Main.mouseRightRelease = false;
+                localPlayer.GetModPlayer<Players.DeathBagPlayer>().RestoreFromBag(this);
+            }
+        }
+
+        // Show action hint when hovering and in range (read by PostDraw)
+        if (dist <= 192f)
+        {
+            Vector2 mouseWorld = Main.MouseWorld;
+            if (NPC.Hitbox.Contains(mouseWorld.ToPoint()))
+                _showActionHint = true;
         }
     }
 
-    // Non-owners can right-click to pick up the bag as an inventory item
+    // Right-click interaction: non-owners pick up, owner restores (loadout) or auto-picks-up (death)
     public override bool CanChat()
     {
         Player localPlayer = Main.LocalPlayer;
-        // Owner picks up automatically — no chat needed
-        if (OwnerPlayerIndex >= 0 && localPlayer.whoAmI == OwnerPlayerIndex)
+        bool isOwner = OwnerPlayerIndex >= 0 && localPlayer.whoAmI == OwnerPlayerIndex;
+
+        // Death bags: owner auto-picks up via magnet — no chat needed
+        // Loadout bags: owner right-click restores instantly in AI() — no chat needed
+        if (isOwner)
             return false;
-        // Non-owners can always pick up (even if owner is offline — carry it for later)
+
+        // Non-owners: always right-click with confirmation (both kinds)
         return true;
     }
 
     public override string GetChat()
     {
+        // Only non-owners reach here (CanChat returns false for owner)
         string name = string.IsNullOrEmpty(OwnerName) ? "Unknown Player" : OwnerName;
-        return $"Pick up {name}'s bag?";
+        return $"Pick up {name}'s {(Kind == BagKind.Loadout ? "loadout" : "bag")}?";
     }
 
     public override void SetChatButtons(ref string button1, ref string button2)
@@ -170,12 +197,12 @@ public sealed class DeathBagNPC : ModNPC
         if (!firstButton)
             return;
 
+        // Only non-owners reach here (CanChat returns false for owner)
         Player localPlayer = Main.LocalPlayer;
 
+        // Non-owner: pick up as inventory item
         if (Main.netMode == NetmodeID.MultiplayerClient)
         {
-            // Server will validate, remove NPC, and send BagToItemResponse
-            // with the bag data — client places the item when it arrives.
             DB.SendBagToItem(Mod, NPC.whoAmI, localPlayer.name);
         }
         else
@@ -197,25 +224,26 @@ public sealed class DeathBagNPC : ModNPC
                 return;
             }
 
+            string kindName = Kind == BagKind.Loadout ? "Loadout" : "Death Bag";
             var item = new Item();
             item.SetDefaults(ModContent.ItemType<Items.DeathBagItem>());
             if (item.ModItem is Items.DeathBagItem bagItem)
             {
+                bagItem.Kind = Kind;
                 bagItem.OwnerName = OwnerName;
                 bagItem.DeathLoadoutIndex = DeathLoadoutIndex;
                 bagItem.SavedInventory = SavedInventory;
                 bagItem.CarrierName = localPlayer.name;
             }
-            item.SetNameOverride($"{OwnerName}'s Death Bag");
+            item.SetNameOverride($"{OwnerName}'s {kindName}");
             localPlayer.inventory[emptySlot] = item;
 
             NPC.active = false;
 
-            Mod.Logger.Info($"[DeathBag] {localPlayer.name} picked up {OwnerName}'s bag ({SavedInventory.Count} items)");
-            Main.NewText($"Picked up {OwnerName}'s bag.", Color.Green);
+            Mod.Logger.Info($"[DeathBag] {localPlayer.name} picked up {OwnerName}'s {kindName} ({SavedInventory.Count} items)");
+            Main.NewText($"Picked up {OwnerName}'s {kindName}.", Color.Green);
         }
 
-        // Close chat UI
         Main.npcChatText = "";
     }
 
@@ -226,6 +254,7 @@ public sealed class DeathBagNPC : ModNPC
 
     public override void SendExtraAI(BinaryWriter writer)
     {
+        writer.Write((byte)Kind);
         writer.Write(OwnerName ?? "");
         writer.Write(OwnerPlayerIndex);
         writer.Write(DeathLoadoutIndex);
@@ -235,36 +264,57 @@ public sealed class DeathBagNPC : ModNPC
 
     public override void ReceiveExtraAI(BinaryReader reader)
     {
+        Kind = (BagKind)reader.ReadByte();
         OwnerName = reader.ReadString();
         OwnerPlayerIndex = reader.ReadInt32();
         DeathLoadoutIndex = reader.ReadInt32();
         DeliveredBy = reader.ReadString();
         SavedInventory = DB.ReadInventory(reader);
 
-        if (!string.IsNullOrEmpty(OwnerName))
-            NPC.GivenName = $"{OwnerName}'s Death Bag";
+        UpdateGivenName();
+    }
+
+    public override bool PreDraw(SpriteBatch spriteBatch, Vector2 screenPos, Color drawColor)
+    {
+        if (Kind == BagKind.Loadout)
+        {
+            // Tint loadout bags blue-green to distinguish from death bags
+            drawColor = new Color(140, 180, 255) * (drawColor.A / 255f);
+        }
+
+        var texture = Terraria.GameContent.TextureAssets.Npc[NPC.type].Value;
+        Vector2 drawPos = NPC.position - screenPos + new Vector2(NPC.width / 2f, NPC.height / 2f + DrawOffsetY);
+        var origin = new Vector2(texture.Width / 2f, texture.Height / 2f);
+        spriteBatch.Draw(texture, drawPos, null, drawColor, 0f, origin, 1f, SpriteEffects.None, 0f);
+        return false; // skip default draw for both kinds
     }
 
     public override void PostDraw(SpriteBatch spriteBatch, Vector2 screenPos, Color drawColor)
     {
-        // Draw owner name above the bag when hovering
-        if (!_mouseHovering)
+        if (!_showActionHint)
             return;
 
-        Vector2 namePos = NPC.Top - screenPos + new Vector2(0, -16);
-        string name = OwnerName;
-        Vector2 textSize = ChatManager.GetStringSize(Terraria.GameContent.FontAssets.MouseText.Value, name, Vector2.One);
-        namePos.X -= textSize.X / 2f;
+        Player localPlayer = Main.LocalPlayer;
+        bool isOwner = OwnerPlayerIndex >= 0 && localPlayer.whoAmI == OwnerPlayerIndex;
+
+        string hint;
+        if (isOwner && Kind == BagKind.Loadout)
+            hint = "[Right-click to restore]";
+        else if (isOwner)
+            return; // Death bag owner: auto-pickup, no hint needed
+        else
+            hint = "[Right-click to pick up]";
+
+        var font = Terraria.GameContent.FontAssets.MouseText.Value;
+        Vector2 textSize = ChatManager.GetStringSize(font, hint, Vector2.One);
+
+        // Position above the sprite center
+        Vector2 textPos = NPC.Center - screenPos + new Vector2(0, -24f - textSize.Y + DrawOffsetY);
+        textPos.X -= textSize.X / 2f;
 
         ChatManager.DrawColorCodedStringWithShadow(
-            spriteBatch,
-            Terraria.GameContent.FontAssets.MouseText.Value,
-            name,
-            namePos,
-            Color.White,
-            0f,
-            Vector2.Zero,
-            Vector2.One);
+            spriteBatch, font, hint, textPos,
+            new Color(200, 200, 200), 0f, Vector2.Zero, Vector2.One);
     }
 
     internal void ResolveOwnerIndex()
@@ -292,6 +342,17 @@ public sealed class DeathBagNPC : ModNPC
                 return;
             }
         }
+    }
+
+    /// <summary>Keep GivenName in sync with Kind/OwnerName so vanilla's hover text is correct.</summary>
+    private void UpdateGivenName()
+    {
+        string kindLabel = Kind == BagKind.Loadout ? "Loadout" : "Death Bag";
+        string expected = string.IsNullOrEmpty(OwnerName)
+            ? $"Unknown Player's {kindLabel}"
+            : $"{OwnerName}'s {kindLabel}";
+        if (NPC.GivenName != expected)
+            NPC.GivenName = expected;
     }
 
     private void PushApartFromOtherBags()

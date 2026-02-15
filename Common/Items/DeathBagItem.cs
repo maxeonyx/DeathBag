@@ -13,11 +13,14 @@ using DB = DeathBag.DeathBag;
 namespace DeathBag.Common.Items;
 
 /// <summary>
-/// Portable death bag item — created when a non-owner picks up someone's bag NPC.
-/// When dropped on the ground, converts back to a bag NPC so the owner can auto-pickup.
+/// Portable bag item — created when a non-owner picks up someone's bag NPC.
+/// When dropped on the ground, converts back to a bag NPC.
 /// </summary>
 public sealed class DeathBagItem : ModItem
 {
+    /// <summary>Whether this is a death bag or loadout bag.</summary>
+    public BagKind Kind = BagKind.Death;
+
     /// <summary>Player name of the bag's owner.</summary>
     public string OwnerName = "";
 
@@ -45,6 +48,8 @@ public sealed class DeathBagItem : ModItem
     public override void ModifyTooltips(List<TooltipLine> tooltips)
     {
         string owner = string.IsNullOrEmpty(OwnerName) ? "Unknown Player" : OwnerName;
+        string kindLabel = Kind == BagKind.Loadout ? "Loadout" : "Death Bag";
+        tooltips.Add(new TooltipLine(Mod, "BagKind", kindLabel));
         tooltips.Add(new TooltipLine(Mod, "BagOwner", $"Contains {owner}'s items ({SavedInventory.Count} items)"));
         tooltips.Add(new TooltipLine(Mod, "BagHint", "Drop near the owner to deliver")
         {
@@ -63,8 +68,16 @@ public sealed class DeathBagItem : ModItem
         if (Main.netMode == NetmodeID.MultiplayerClient)
             return;
 
+        if (SavedInventory.Count == 0)
+            return;
+
         SpawnBagNPCFromItem();
-        Item.TurnToAir();
+
+        // Remove the world item entity — active = false is how vanilla removes ground items.
+        // TurnToAir() only zeroes type/stack (designed for inventory slots, not world entities).
+        Item.active = false;
+        if (Main.netMode == NetmodeID.Server)
+            NetMessage.SendData(MessageID.SyncItem, -1, -1, null, Item.whoAmI);
     }
 
     private void SpawnBagNPCFromItem()
@@ -84,31 +97,33 @@ public sealed class DeathBagItem : ModItem
         NPC npc = Main.npc[npcIndex];
         if (npc.ModNPC is DeathBagNPC bagNPC)
         {
+            bagNPC.Kind = Kind;
             bagNPC.OwnerName = OwnerName;
             bagNPC.DeathLoadoutIndex = DeathLoadoutIndex;
             bagNPC.SavedInventory = SavedInventory;
             bagNPC.DeliveredBy = CarrierName;
             bagNPC.ResolveOwnerIndex();
-            npc.GivenName = $"{OwnerName}'s Death Bag";
             npc.netUpdate = true;
-            Mod.Logger.Info($"[DeathBag] Converted bag item back to NPC for {OwnerName} with {SavedInventory.Count} items (delivered by {CarrierName})");
+            Mod.Logger.Info($"[DeathBag] Converted bag item back to NPC for {OwnerName} with {SavedInventory.Count} items, kind={Kind} (delivered by {CarrierName})");
 
             // Broadcast delivery message to all players
+            string deliveryKind = Kind == BagKind.Loadout ? "loadout" : "bag";
             if (!string.IsNullOrEmpty(CarrierName) && Main.netMode == NetmodeID.Server)
             {
                 ChatHelper.BroadcastChatMessage(
-                    NetworkText.FromLiteral($"{CarrierName} dropped {OwnerName}'s bag nearby."),
+                    NetworkText.FromLiteral($"{CarrierName} dropped {OwnerName}'s {deliveryKind} nearby."),
                     Color.LightGreen);
             }
             else if (!string.IsNullOrEmpty(CarrierName) && Main.netMode == NetmodeID.SinglePlayer)
             {
-                Main.NewText($"{CarrierName} dropped {OwnerName}'s bag nearby.", Color.LightGreen);
+                Main.NewText($"{CarrierName} dropped {OwnerName}'s {deliveryKind} nearby.", Color.LightGreen);
             }
         }
     }
 
     public override void SaveData(TagCompound tag)
     {
+        tag["kind"] = (byte)Kind;
         tag["ownerName"] = OwnerName;
         tag["deathLoadout"] = DeathLoadoutIndex;
         tag["carrierName"] = CarrierName;
@@ -127,6 +142,7 @@ public sealed class DeathBagItem : ModItem
 
     public override void LoadData(TagCompound tag)
     {
+        Kind = tag.ContainsKey("kind") ? (BagKind)tag.GetByte("kind") : BagKind.Death;
         OwnerName = tag.GetString("ownerName");
         DeathLoadoutIndex = tag.ContainsKey("deathLoadout") ? tag.GetInt("deathLoadout") : 0;
         CarrierName = tag.ContainsKey("carrierName") ? tag.GetString("carrierName") : "";
@@ -146,6 +162,7 @@ public sealed class DeathBagItem : ModItem
 
     public override void NetSend(BinaryWriter writer)
     {
+        writer.Write((byte)Kind);
         writer.Write(OwnerName ?? "");
         writer.Write(DeathLoadoutIndex);
         writer.Write(CarrierName ?? "");
@@ -154,6 +171,7 @@ public sealed class DeathBagItem : ModItem
 
     public override void NetReceive(BinaryReader reader)
     {
+        Kind = (BagKind)reader.ReadByte();
         OwnerName = reader.ReadString();
         DeathLoadoutIndex = reader.ReadInt32();
         CarrierName = reader.ReadString();

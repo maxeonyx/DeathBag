@@ -1,0 +1,32 @@
+using Terraria;
+using Terraria.ID;
+using Terraria.ModLoader;
+using DeathBag.Common.Tiles;
+
+namespace DeathBag.Common.Items;
+
+/// <summary>
+/// Placeable item for the Loadout Station furniture tile.
+/// Dungeon-tier recipe — mid game.
+/// </summary>
+public sealed class LoadoutStationItem : ModItem
+{
+    public override void SetDefaults()
+    {
+        Item.DefaultToPlaceableTile(ModContent.TileType<LoadoutStationTile>());
+        Item.width = 28;
+        Item.height = 20;
+        Item.value = Item.buyPrice(gold: 5);
+        Item.rare = ItemRarityID.Green;
+    }
+
+    public override void AddRecipes()
+    {
+        // Dungeon-tier: requires dungeon materials
+        CreateRecipe()
+            .AddIngredient(ItemID.Bone, 25)
+            .AddIngredient(ItemID.GoldenChest)
+            .AddTile(TileID.WorkBenches)
+            .Register();
+    }
+}

@@ -48,6 +48,7 @@ public sealed class DeathBag : Mod
 
     private void HandleBagCreated(BinaryReader reader, int whoAmI)
     {
+        var kind = (BagKind)reader.ReadByte();
         float x = reader.ReadSingle();
         float y = reader.ReadSingle();
         string ownerName = reader.ReadString();
@@ -58,7 +59,8 @@ public sealed class DeathBag : Mod
         if (Main.netMode != NetmodeID.Server)
             return;
 
-        Logger.Info($"[DeathBag] Server: BagCreated from {ownerName} with {inventory.Count} items at ({x:F0}, {y:F0}), loadout {deathLoadoutIndex}");
+        string kindName = kind == BagKind.Loadout ? "Loadout" : "Death Bag";
+        Logger.Info($"[DeathBag] Server: BagCreated ({kindName}) from {ownerName} with {inventory.Count} items at ({x:F0}, {y:F0}), loadout {deathLoadoutIndex}");
 
         int npcIndex = NPC.NewNPC(
             Terraria.Entity.GetSource_NaturalSpawn(),
@@ -74,11 +76,11 @@ public sealed class DeathBag : Mod
         NPC npc = Main.npc[npcIndex];
         if (npc.ModNPC is DeathBagNPC bagNPC)
         {
+            bagNPC.Kind = kind;
             bagNPC.OwnerName = ownerName;
             bagNPC.OwnerPlayerIndex = ownerIndex;
             bagNPC.DeathLoadoutIndex = deathLoadoutIndex;
             bagNPC.SavedInventory = inventory;
-            npc.GivenName = $"{ownerName}'s Death Bag";
 
             // netAlways + netUpdate ensures vanilla syncs this NPC (with SendExtraAI data) to all clients
             npc.netUpdate = true;
@@ -124,13 +126,15 @@ public sealed class DeathBag : Mod
         // (inventory is client-authoritative — server can't modify it)
         var response = GetPacket();
         response.Write((byte)MessageType.BagToItemResponse);
+        response.Write((byte)bagNPC.Kind);
         response.Write(bagNPC.OwnerName);
         response.Write(bagNPC.DeathLoadoutIndex);
         response.Write(carrierName);
         WriteInventory(response, bagNPC.SavedInventory);
         response.Send(whoAmI); // to requesting client only
 
-        Logger.Info($"[DeathBag] Server: sent BagToItemResponse for {bagNPC.OwnerName}'s bag to {carrierName} (player {whoAmI})");
+        string kindName = bagNPC.Kind == BagKind.Loadout ? "Loadout" : "Death Bag";
+        Logger.Info($"[DeathBag] Server: sent BagToItemResponse for {bagNPC.OwnerName}'s {kindName} to {carrierName} (player {whoAmI})");
 
         // Remove the NPC
         npc.active = false;
@@ -140,6 +144,7 @@ public sealed class DeathBag : Mod
 
     private void HandleBagToItemResponse(BinaryReader reader)
     {
+        var kind = (BagKind)reader.ReadByte();
         string ownerName = reader.ReadString();
         int deathLoadoutIndex = reader.ReadInt32();
         string carrierName = reader.ReadString();
@@ -168,31 +173,35 @@ public sealed class DeathBag : Mod
             return;
         }
 
+        string kindName = kind == BagKind.Loadout ? "Loadout" : "Death Bag";
+
         // Create the bag item in our own inventory (client-authoritative)
         var item = new Item();
         item.SetDefaults(ModContent.ItemType<DeathBagItem>());
         if (item.ModItem is DeathBagItem bagItem)
         {
+            bagItem.Kind = kind;
             bagItem.OwnerName = ownerName;
             bagItem.DeathLoadoutIndex = deathLoadoutIndex;
             bagItem.SavedInventory = inventory;
             bagItem.CarrierName = carrierName;
         }
-        item.SetNameOverride($"{ownerName}'s Death Bag");
+        item.SetNameOverride($"{ownerName}'s {kindName}");
         localPlayer.inventory[emptySlot] = item;
 
-        Logger.Info($"[DeathBag] Client: placed {ownerName}'s bag in inventory slot {emptySlot}");
-        Main.NewText($"Picked up {ownerName}'s bag.", Microsoft.Xna.Framework.Color.Green);
+        Logger.Info($"[DeathBag] Client: placed {ownerName}'s {kindName} in inventory slot {emptySlot}");
+        Main.NewText($"Picked up {ownerName}'s {kindName.ToLower()}.", Microsoft.Xna.Framework.Color.Green);
     }
 
     /// <summary>
     /// Sends BagCreated packet from client to server.
     /// </summary>
-    internal static void SendBagCreated(Mod mod, float x, float y, string ownerName, int ownerIndex,
+    internal static void SendBagCreated(Mod mod, BagKind kind, float x, float y, string ownerName, int ownerIndex,
         int deathLoadoutIndex, List<(int SlotIndex, Item Item)> inventory)
     {
         var packet = mod.GetPacket();
         packet.Write((byte)MessageType.BagCreated);
+        packet.Write((byte)kind);
         packet.Write(x);
         packet.Write(y);
         packet.Write(ownerName);
