@@ -195,12 +195,24 @@ public sealed class DeathBagPlayer : ModPlayer
                 remaining -= canAdd;
             }
 
-            // Try placing in empty inventory slots (skip ammo 50-53 and coin 54-57 slots)
+            // Try placing in empty inventory slots, respecting slot type restrictions:
+            // Slots 50-53: ammo only (item.ammo != 0 || item.bait != 0)
+            // Slots 54-57: coins only (item.IsACoin)
+            // Slots 0-49, 58: anything
             for (int i = 0; i < invSlots && remaining > 0; i++)
             {
-                if (i >= 50 && i <= 57)
-                    continue;
                 if (result.ContainsKey(i))
+                    continue;
+
+                bool slotAccepts;
+                if (i >= 54 && i <= 57)
+                    slotAccepts = current.IsACoin;
+                else if (i >= 50 && i <= 53)
+                    slotAccepts = current.ammo != 0 || current.bait > 0;
+                else
+                    slotAccepts = true;
+
+                if (!slotAccepts)
                     continue;
 
                 Item placed = current.Clone();
