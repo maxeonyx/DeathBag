@@ -16,8 +16,10 @@ public sealed class DeathBag : Mod
         BagCreated,
         /// <summary>Client -> server: player restored their bag, remove it.</summary>
         BagRemoved,
-        /// <summary>Client -> server: non-owner picked up bag NPC, convert to DeathBagItem world entity.</summary>
+        /// <summary>Client -> server: non-owner wants to pick up bag NPC.</summary>
         BagToItem,
+        /// <summary>Server -> client: bag NPC removed, place this DeathBagItem in your inventory.</summary>
+        BagToItemResponse,
     }
 
     public override void HandlePacket(BinaryReader reader, int whoAmI)
@@ -34,6 +36,9 @@ public sealed class DeathBag : Mod
                 break;
             case MessageType.BagToItem:
                 HandleBagToItem(reader, whoAmI);
+                break;
+            case MessageType.BagToItemResponse:
+                HandleBagToItemResponse(reader);
                 break;
             default:
                 Logger.Warn($"[DeathBag] Unknown packet type: {msgType}");
@@ -113,12 +118,43 @@ public sealed class DeathBag : Mod
             return;
         }
 
-        // Find an empty inventory slot on the requesting player
-        Player carrier = Main.player[whoAmI];
+        NPC npc = Main.npc[npcIndex];
+
+        // Send bag data to the requesting client so it can place the item itself
+        // (inventory is client-authoritative — server can't modify it)
+        var response = GetPacket();
+        response.Write((byte)MessageType.BagToItemResponse);
+        response.Write(bagNPC.OwnerName);
+        response.Write(bagNPC.DeathLoadoutIndex);
+        response.Write(carrierName);
+        WriteInventory(response, bagNPC.SavedInventory);
+        response.Send(whoAmI); // to requesting client only
+
+        Logger.Info($"[DeathBag] Server: sent BagToItemResponse for {bagNPC.OwnerName}'s bag to {carrierName} (player {whoAmI})");
+
+        // Remove the NPC
+        npc.active = false;
+        npc.netUpdate = true;
+        NetMessage.SendData(MessageID.SyncNPC, -1, -1, null, npcIndex);
+    }
+
+    private void HandleBagToItemResponse(BinaryReader reader)
+    {
+        string ownerName = reader.ReadString();
+        int deathLoadoutIndex = reader.ReadInt32();
+        string carrierName = reader.ReadString();
+        var inventory = ReadInventory(reader);
+
+        if (Main.netMode != NetmodeID.MultiplayerClient)
+            return;
+
+        Player localPlayer = Main.LocalPlayer;
+
+        // Find empty inventory slot
         int emptySlot = -1;
-        for (int i = 0; i < 50; i++) // Main inventory only (0-49)
+        for (int i = 0; i < 50; i++)
         {
-            if (carrier.inventory[i] == null || carrier.inventory[i].IsAir)
+            if (localPlayer.inventory[i] == null || localPlayer.inventory[i].IsAir)
             {
                 emptySlot = i;
                 break;
@@ -127,35 +163,26 @@ public sealed class DeathBag : Mod
 
         if (emptySlot < 0)
         {
-            Logger.Info($"[DeathBag] Server: {carrierName} has no room for bag item");
-            // TODO: notify client "no room" — for now they see the local message
+            Logger.Warn($"[DeathBag] Client: no room for {ownerName}'s bag item");
+            Main.NewText("No room in your inventory!", Microsoft.Xna.Framework.Color.Yellow);
             return;
         }
 
-        NPC npc = Main.npc[npcIndex];
-
-        // Create the bag item directly in the player's inventory
+        // Create the bag item in our own inventory (client-authoritative)
         var item = new Item();
         item.SetDefaults(ModContent.ItemType<DeathBagItem>());
         if (item.ModItem is DeathBagItem bagItem)
         {
-            bagItem.OwnerName = bagNPC.OwnerName;
-            bagItem.DeathLoadoutIndex = bagNPC.DeathLoadoutIndex;
-            bagItem.SavedInventory = bagNPC.SavedInventory;
+            bagItem.OwnerName = ownerName;
+            bagItem.DeathLoadoutIndex = deathLoadoutIndex;
+            bagItem.SavedInventory = inventory;
             bagItem.CarrierName = carrierName;
         }
-        item.SetNameOverride($"{bagNPC.OwnerName}'s Death Bag");
-        carrier.inventory[emptySlot] = item;
+        item.SetNameOverride($"{ownerName}'s Death Bag");
+        localPlayer.inventory[emptySlot] = item;
 
-        // Sync the inventory slot to all clients
-        NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, whoAmI, emptySlot);
-
-        Logger.Info($"[DeathBag] Server: placed {bagNPC.OwnerName}'s bag in {carrierName}'s inventory slot {emptySlot}");
-
-        // Remove the NPC
-        npc.active = false;
-        npc.netUpdate = true;
-        NetMessage.SendData(MessageID.SyncNPC, -1, -1, null, npcIndex);
+        Logger.Info($"[DeathBag] Client: placed {ownerName}'s bag in inventory slot {emptySlot}");
+        Main.NewText($"Picked up {ownerName}'s bag.", Microsoft.Xna.Framework.Color.Green);
     }
 
     /// <summary>

@@ -174,6 +174,8 @@ public sealed class DeathBagNPC : ModNPC
 
         if (Main.netMode == NetmodeID.MultiplayerClient)
         {
+            // Server will validate, remove NPC, and send BagToItemResponse
+            // with the bag data — client places the item when it arrives.
             DB.SendBagToItem(Mod, NPC.whoAmI, localPlayer.name);
         }
         else
@@ -208,10 +210,10 @@ public sealed class DeathBagNPC : ModNPC
             localPlayer.inventory[emptySlot] = item;
 
             NPC.active = false;
-        }
 
-        Mod.Logger.Info($"[DeathBag] {localPlayer.name} picked up {OwnerName}'s bag ({SavedInventory.Count} items)");
-        Main.NewText($"Picked up {OwnerName}'s bag.", Color.Green);
+            Mod.Logger.Info($"[DeathBag] {localPlayer.name} picked up {OwnerName}'s bag ({SavedInventory.Count} items)");
+            Main.NewText($"Picked up {OwnerName}'s bag.", Color.Green);
+        }
 
         // Close chat UI
         Main.npcChatText = "";
