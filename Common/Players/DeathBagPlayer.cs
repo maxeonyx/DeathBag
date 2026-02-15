@@ -85,7 +85,7 @@ public sealed class DeathBagPlayer : ModPlayer
 
     /// <summary>
     /// Restores inventory from a bag using plan-then-execute pattern.
-    /// Called from DeathBagNPC.OnChatButtonClicked on the owning client.
+    /// Called from DeathBagNPC.AI() on right-click by the owning client.
     /// </summary>
     public void RestoreFromBag(DeathBagNPC bag)
     {
@@ -197,9 +197,7 @@ public sealed class DeathBagPlayer : ModPlayer
             Player.QuickSpawnItem(Player.GetSource_Misc("DeathBagOverflow"), drop, drop.stack);
         }
 
-        // Close chat UI first, then defer NPC removal to next tick
-        Main.npcChatText = "";
-        Player.SetTalkNPC(-1);
+        // Defer NPC removal to next tick (removing mid-frame can crash)
         _pendingBagRemoval = bag.NPC.whoAmI;
 
         // Sync inventory to server
@@ -263,6 +261,7 @@ public sealed class DeathBagPlayer : ModPlayer
             bagNPC.OwnerPlayerIndex = Player.whoAmI;
             bagNPC.OwnerName = Player.name;
             bagNPC.SavedInventory = inventory;
+            npc.GivenName = $"{Player.name}'s Death Bag";
             Mod.Logger.Info($"[DeathBag] Bag NPC spawned (index {npcIndex}) for {Player.name} with {inventory.Count} items");
         }
         else

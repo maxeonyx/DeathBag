@@ -1,15 +1,17 @@
 using System;
 using System.Collections.Generic;
 using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
 using Terraria;
 using Terraria.ID;
 using Terraria.ModLoader;
+using Terraria.UI.Chat;
 
 namespace DeathBag.Common.NPCs;
 
 /// <summary>
 /// The bag entity that appears at the player's death location.
-/// A friendly, stationary, immortal ModNPC with right-click interaction.
+/// A friendly, stationary, immortal ModNPC with direct right-click interaction (no chat UI).
 /// </summary>
 public sealed class DeathBagNPC : ModNPC
 {
@@ -25,11 +27,13 @@ public sealed class DeathBagNPC : ModNPC
     /// </summary>
     public List<(int SlotIndex, Item Item)> SavedInventory = new();
 
+    /// <summary>Whether the local player's mouse is currently over this NPC.</summary>
+    private bool _mouseHovering;
+
     public override void SetStaticDefaults()
     {
         Main.npcFrameCount[Type] = 1;
 
-        // Prevent this NPC from appearing in the bestiary
         NPCID.Sets.NPCBestiaryDrawModifiers drawModifiers = new()
         {
             Hide = true,
@@ -59,52 +63,83 @@ public sealed class DeathBagNPC : ModNPC
 
     public override void AI()
     {
-        // Stationary: kill all horizontal velocity, let gravity work
         NPC.velocity.X = 0f;
-
-        // Push apart from other bag NPCs so they're individually clickable
         PushApartFromOtherBags();
-    }
 
-    public override bool CanChat() => true;
-
-    public override string GetChat()
-    {
-        Player player = Main.LocalPlayer;
-        if (player.whoAmI != OwnerPlayerIndex)
-            return $"This is {OwnerName}'s bag.";
-
-        return "Your death bag. Click to restore your inventory.";
-    }
-
-    public override void SetChatButtons(ref string button1, ref string button2)
-    {
-        Player player = Main.LocalPlayer;
-        if (player.whoAmI == OwnerPlayerIndex)
-            button1 = "Restore";
-    }
-
-    public override void OnChatButtonClicked(bool firstButton, ref string shopName)
-    {
-        if (!firstButton)
+        // Client-side: handle hover and right-click interaction
+        if (Main.netMode == NetmodeID.Server)
             return;
 
-        Player player = Main.LocalPlayer;
-        if (player.whoAmI != OwnerPlayerIndex)
+        _mouseHovering = false;
+
+        // Check if local player's mouse is over this NPC
+        Vector2 mouseWorld = Main.MouseWorld;
+        Rectangle hitbox = NPC.Hitbox;
+
+        if (!hitbox.Contains(mouseWorld.ToPoint()))
             return;
 
-        // Close the chat UI
-        Main.npcChatText = "";
-        Main.LocalPlayer.SetTalkNPC(-1);
+        // Check player is close enough to interact (same range as NPC chat: ~192 pixels / 12 tiles)
+        Player player = Main.LocalPlayer;
+        float dist = Vector2.Distance(player.Center, NPC.Center);
+        if (dist > 192f)
+            return;
 
-        // Perform the restore
-        player.GetModPlayer<Players.DeathBagPlayer>().RestoreFromBag(this);
+        _mouseHovering = true;
+
+        // Show hover text
+        bool isOwner = player.whoAmI == OwnerPlayerIndex;
+        string hoverText = isOwner
+            ? $"{OwnerName}'s Bag [Right-click to restore]"
+            : $"{OwnerName}'s Bag";
+
+        Main.instance.MouseText(hoverText);
+
+        // Consume the right-click so Terraria doesn't try other interactions
+        if (Main.mouseRight && Main.mouseRightRelease)
+        {
+            Main.mouseRightRelease = false;
+
+            if (isOwner)
+            {
+                Mod.Logger.Info($"[DeathBag] Right-click restore triggered by {player.name}");
+                player.GetModPlayer<Players.DeathBagPlayer>().RestoreFromBag(this);
+            }
+            else
+            {
+                Main.NewText($"This is {OwnerName}'s bag.", Color.Yellow);
+            }
+        }
     }
+
+    // Disable chat UI entirely — interaction is handled in AI()
+    public override bool CanChat() => false;
 
     public override bool CheckActive()
     {
-        // Never despawn naturally
         return false;
+    }
+
+    public override void PostDraw(SpriteBatch spriteBatch, Vector2 screenPos, Color drawColor)
+    {
+        // Draw owner name above the bag when hovering
+        if (!_mouseHovering)
+            return;
+
+        Vector2 namePos = NPC.Top - screenPos + new Vector2(0, -16);
+        string name = OwnerName;
+        Vector2 textSize = ChatManager.GetStringSize(Terraria.GameContent.FontAssets.MouseText.Value, name, Vector2.One);
+        namePos.X -= textSize.X / 2f;
+
+        ChatManager.DrawColorCodedStringWithShadow(
+            spriteBatch,
+            Terraria.GameContent.FontAssets.MouseText.Value,
+            name,
+            namePos,
+            Color.White,
+            0f,
+            Vector2.Zero,
+            Vector2.One);
     }
 
     private void PushApartFromOtherBags()
@@ -119,11 +154,11 @@ public sealed class DeathBagNPC : ModNPC
                 continue;
 
             Vector2 diff = NPC.Center - other.Center;
-            float dist = diff.Length();
+            float distBetween = diff.Length();
 
-            if (dist < pushRadius && dist > 0.01f)
+            if (distBetween < pushRadius && distBetween > 0.01f)
             {
-                Vector2 push = Vector2.Normalize(diff) * pushStrength * (1f - dist / pushRadius);
+                Vector2 push = Vector2.Normalize(diff) * pushStrength * (1f - distBetween / pushRadius);
                 NPC.position += push;
             }
         }
