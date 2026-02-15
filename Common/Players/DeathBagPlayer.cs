@@ -254,6 +254,9 @@ public sealed class DeathBagPlayer : ModPlayer
         // Defer NPC removal to next tick (removing mid-frame can crash)
         _pendingBagRemoval = bag.NPC.whoAmI;
 
+        // Mark bag as consumed immediately so AI() can't trigger a second restore
+        bag.SavedInventory.Clear();
+
         // Sync all equipment slots to server
         if (Main.netMode == NetmodeID.MultiplayerClient)
         {
