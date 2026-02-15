@@ -99,59 +99,62 @@ public sealed class DeathBagPlayer : ModPlayer
 
         // === PLAN PHASE (no mutations) ===
 
-        int totalSlots = Player.inventory.Length;
-        Mod.Logger.Info($"[DeathBag] Player inventory has {totalSlots} slots");
+        // Build result map: unified slot index -> item
+        // Saved items reclaim their exact slots; equipment slots (59+) are never
+        // used for re-absorption overflow — only inventory slots (0-58) absorb.
+        var result = new Dictionary<int, Item>();
 
-        Item[] result = new Item[totalSlots];
-
-        // Initialize result with empty items
-        for (int i = 0; i < totalSlots; i++)
-        {
-            result[i] = new Item();
-        }
-
-        // Step 1: Saved items reclaim their exact slots
-        int restoredCount = 0;
-        int skippedCount = 0;
         foreach (var (slotIndex, savedItem) in bag.SavedInventory)
         {
-            if (slotIndex >= 0 && slotIndex < totalSlots)
-            {
-                result[slotIndex] = savedItem.Clone();
-                restoredCount++;
-            }
-            else
-            {
-                Mod.Logger.Warn($"[DeathBag] Saved item '{savedItem.Name}' has out-of-range slot {slotIndex} (max {totalSlots - 1}), dropping as overflow");
-                skippedCount++;
-            }
+            result[slotIndex] = savedItem.Clone();
         }
-        Mod.Logger.Info($"[DeathBag] Step 1: {restoredCount} items reclaimed slots, {skippedCount} skipped (out of range)");
+        Mod.Logger.Info($"[DeathBag] Step 1: {result.Count} saved items reclaim their slots");
 
-        // Step 2: Collect current items that need re-absorption
+        // Collect current items from ALL arrays that need re-absorption
         var currentItems = new List<Item>();
-        for (int i = 0; i < totalSlots; i++)
+
+        void CollectCurrent(Item[] array, int baseSlot)
         {
-            Item current = Player.inventory[i];
-            if (current is not null && !current.IsAir)
-                currentItems.Add(current.Clone());
+            for (int i = 0; i < array.Length; i++)
+            {
+                Item item = array[i];
+                if (item is not null && !item.IsAir)
+                    currentItems.Add(item.Clone());
+            }
         }
+
+        CollectCurrent(Player.inventory, 0);
+        CollectCurrent(Player.armor, SlotArmor);
+        CollectCurrent(Player.dye, SlotDye);
+        CollectCurrent(Player.miscEquips, SlotMiscEquips);
+        CollectCurrent(Player.miscDyes, SlotMiscDyes);
+
+        for (int l = 0; l < Player.Loadouts.Length; l++)
+        {
+            if (l == Player.CurrentLoadoutIndex)
+                continue;
+            int loadoutBase = SlotLoadoutsStart + l * LoadoutSize;
+            CollectCurrent(Player.Loadouts[l].Armor, loadoutBase);
+            CollectCurrent(Player.Loadouts[l].Dye, loadoutBase + 20);
+        }
+
         Mod.Logger.Info($"[DeathBag] Step 2: {currentItems.Count} current items to re-absorb");
 
-        // Step 3: Re-absorb current items — stack first, then empty slots
+        // Re-absorb current items into inventory slots (0-58) only.
+        // Equipment slots are exact-position — we don't stuff adventure pickups into armor slots.
+        int invSlots = Player.inventory.Length; // 59
         var toDrop = new List<Item>();
 
         foreach (Item current in currentItems)
         {
             int remaining = current.stack;
 
-            // Try stacking onto matching items in result
-            for (int i = 0; i < totalSlots && remaining > 0; i++)
+            // Try stacking onto matching items already in inventory result slots
+            for (int i = 0; i < invSlots && remaining > 0; i++)
             {
-                Item target = result[i];
-                if (target.IsAir || target.type != current.type)
+                if (!result.TryGetValue(i, out Item target) || target.IsAir)
                     continue;
-                if (target.stack >= target.maxStack)
+                if (target.type != current.type || target.stack >= target.maxStack)
                     continue;
 
                 int canAdd = Math.Min(remaining, target.maxStack - target.stack);
@@ -159,10 +162,10 @@ public sealed class DeathBagPlayer : ModPlayer
                 remaining -= canAdd;
             }
 
-            // Try placing in empty slots
-            for (int i = 0; i < totalSlots && remaining > 0; i++)
+            // Try placing in empty inventory slots
+            for (int i = 0; i < invSlots && remaining > 0; i++)
             {
-                if (!result[i].IsAir)
+                if (result.ContainsKey(i))
                     continue;
 
                 Item placed = current.Clone();
@@ -171,7 +174,6 @@ public sealed class DeathBagPlayer : ModPlayer
                 remaining = 0;
             }
 
-            // Overflow
             if (remaining > 0)
             {
                 Item overflow = current.Clone();
@@ -183,12 +185,31 @@ public sealed class DeathBagPlayer : ModPlayer
 
         // === EXECUTE PHASE (single tick) ===
 
-        Mod.Logger.Info($"[DeathBag] Executing restore: {totalSlots} slots, {toDrop.Count} overflow items");
+        Mod.Logger.Info($"[DeathBag] Executing restore: {result.Count} slots filled, {toDrop.Count} overflow items");
 
-        // Overwrite inventory atomically
-        for (int i = 0; i < totalSlots; i++)
+        // Write results back to the correct arrays
+        void WriteBack(Item[] array, int baseSlot)
         {
-            Player.inventory[i] = result[i];
+            for (int i = 0; i < array.Length; i++)
+            {
+                int slot = baseSlot + i;
+                array[i] = result.TryGetValue(slot, out Item item) ? item : new Item();
+            }
+        }
+
+        WriteBack(Player.inventory, 0);
+        WriteBack(Player.armor, SlotArmor);
+        WriteBack(Player.dye, SlotDye);
+        WriteBack(Player.miscEquips, SlotMiscEquips);
+        WriteBack(Player.miscDyes, SlotMiscDyes);
+
+        for (int l = 0; l < Player.Loadouts.Length; l++)
+        {
+            if (l == Player.CurrentLoadoutIndex)
+                continue;
+            int loadoutBase = SlotLoadoutsStart + l * LoadoutSize;
+            WriteBack(Player.Loadouts[l].Armor, loadoutBase);
+            WriteBack(Player.Loadouts[l].Dye, loadoutBase + 20);
         }
 
         // Drop overflow items
@@ -200,10 +221,12 @@ public sealed class DeathBagPlayer : ModPlayer
         // Defer NPC removal to next tick (removing mid-frame can crash)
         _pendingBagRemoval = bag.NPC.whoAmI;
 
-        // Sync inventory to server
+        // Sync all equipment slots to server
         if (Main.netMode == NetmodeID.MultiplayerClient)
         {
-            for (int i = 0; i < totalSlots; i++)
+            // Highest possible slot: loadout 2 dye end = 99 + 2*30 + 10 = 189
+            int maxSlot = SlotLoadoutsStart + Player.Loadouts.Length * LoadoutSize;
+            for (int i = 0; i < maxSlot; i++)
             {
                 NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, Player.whoAmI, i);
             }
@@ -213,18 +236,52 @@ public sealed class DeathBagPlayer : ModPlayer
         Mod.Logger.Info("[DeathBag] Restore complete");
     }
 
+    /// <summary>
+    /// Slot index ranges matching SyncEquipment conventions:
+    ///   0-58:   Player.inventory
+    ///   59-78:  Player.armor (armor, accessories, vanity)
+    ///   79-88:  Player.dye
+    ///   89-93:  Player.miscEquips
+    ///   94-98:  Player.miscDyes
+    ///   99+:    Loadout slots (each loadout: 20 armor + 10 dye = 30 slots)
+    ///           Loadout 0 = 99-128, Loadout 1 = 129-158, Loadout 2 = 159-188
+    /// </summary>
+    private const int SlotArmor = 59;
+    private const int SlotDye = 79;
+    private const int SlotMiscEquips = 89;
+    private const int SlotMiscDyes = 94;
+    private const int SlotLoadoutsStart = 99;
+    private const int LoadoutSize = 30; // 20 armor + 10 dye per loadout
+
     private List<(int SlotIndex, Item Item)> SnapshotInventory()
     {
         var snapshot = new List<(int, Item)>();
 
-        for (int i = 0; i < Player.inventory.Length; i++)
+        void Snap(Item[] array, int baseSlot)
         {
-            Item item = Player.inventory[i];
-            if (item is not null && !item.IsAir)
+            for (int i = 0; i < array.Length; i++)
             {
-                snapshot.Add((i, item.Clone()));
-                Mod.Logger.Debug($"[DeathBag] Snapshot slot {i}: {item.Name} x{item.stack}");
+                Item item = array[i];
+                if (item is not null && !item.IsAir)
+                    snapshot.Add((baseSlot + i, item.Clone()));
             }
+        }
+
+        Snap(Player.inventory, 0);
+        Snap(Player.armor, SlotArmor);
+        Snap(Player.dye, SlotDye);
+        Snap(Player.miscEquips, SlotMiscEquips);
+        Snap(Player.miscDyes, SlotMiscDyes);
+
+        // Inactive loadouts (active loadout's items are already in Player.armor/dye)
+        for (int l = 0; l < Player.Loadouts.Length; l++)
+        {
+            if (l == Player.CurrentLoadoutIndex)
+                continue;
+
+            int loadoutBase = SlotLoadoutsStart + l * LoadoutSize;
+            Snap(Player.Loadouts[l].Armor, loadoutBase);
+            Snap(Player.Loadouts[l].Dye, loadoutBase + 20);
         }
 
         return snapshot;
@@ -232,9 +289,25 @@ public sealed class DeathBagPlayer : ModPlayer
 
     private void ClearInventory()
     {
-        for (int i = 0; i < Player.inventory.Length; i++)
+        void Clear(Item[] array)
         {
-            Player.inventory[i] = new Item();
+            for (int i = 0; i < array.Length; i++)
+                array[i] = new Item();
+        }
+
+        Clear(Player.inventory);
+        Clear(Player.armor);
+        Clear(Player.dye);
+        Clear(Player.miscEquips);
+        Clear(Player.miscDyes);
+
+        for (int l = 0; l < Player.Loadouts.Length; l++)
+        {
+            if (l == Player.CurrentLoadoutIndex)
+                continue;
+
+            Clear(Player.Loadouts[l].Armor);
+            Clear(Player.Loadouts[l].Dye);
         }
     }
 
