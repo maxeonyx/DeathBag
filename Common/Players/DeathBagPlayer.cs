@@ -19,6 +19,11 @@ public sealed class DeathBagPlayer : ModPlayer
     private List<(int SlotIndex, Item Item)>? _deathSnapshot;
 
     /// <summary>
+    /// Which loadout was active at time of death. Used to restore the correct loadout.
+    /// </summary>
+    private int _deathLoadoutIndex;
+
+    /// <summary>
     /// NPC index to remove next tick (deferred to avoid crashing chat UI).
     /// -1 means nothing pending.
     /// </summary>
@@ -35,6 +40,7 @@ public sealed class DeathBagPlayer : ModPlayer
 
         // Snapshot the full inventory before death clears it
         _deathSnapshot = SnapshotInventory();
+        _deathLoadoutIndex = Player.CurrentLoadoutIndex;
 
         Mod.Logger.Info($"[DeathBag] PreKill: snapshotted {_deathSnapshot.Count} items for {Player.name}");
 
@@ -62,8 +68,8 @@ public sealed class DeathBagPlayer : ModPlayer
         var snapshot = _deathSnapshot;
         _deathSnapshot = null;
 
-        Mod.Logger.Info($"[DeathBag] Kill: spawning bag with {snapshot.Count} items at ({Player.Center.X:F0}, {Player.Center.Y:F0})");
-        SpawnBagNPC(Player.Center, snapshot);
+        Mod.Logger.Info($"[DeathBag] Kill: spawning bag with {snapshot.Count} items at ({Player.Center.X:F0}, {Player.Center.Y:F0}), loadout {_deathLoadoutIndex}");
+        SpawnBagNPC(Player.Center, snapshot, _deathLoadoutIndex);
     }
 
     public override void PostUpdate()
@@ -106,6 +112,14 @@ public sealed class DeathBagPlayer : ModPlayer
         }
 
         Mod.Logger.Info($"[DeathBag] RestoreFromBag: restoring {bag.SavedInventory.Count} saved items for {Player.name}");
+
+        // Switch to the loadout that was active at death, so slot indices map to the correct arrays.
+        // TrySwitchingLoadout is a no-op if already on the correct loadout.
+        if (Player.CurrentLoadoutIndex != bag.DeathLoadoutIndex)
+        {
+            Mod.Logger.Info($"[DeathBag] Switching loadout {Player.CurrentLoadoutIndex} -> {bag.DeathLoadoutIndex} to match death state");
+            Player.TrySwitchingLoadout(bag.DeathLoadoutIndex);
+        }
 
         // === PLAN PHASE (no mutations) ===
 
@@ -368,12 +382,12 @@ public sealed class DeathBagPlayer : ModPlayer
         }
     }
 
-    private void SpawnBagNPC(Vector2 position, List<(int SlotIndex, Item Item)> inventory)
+    private void SpawnBagNPC(Vector2 position, List<(int SlotIndex, Item Item)> inventory, int deathLoadoutIndex)
     {
         if (Main.netMode == NetmodeID.MultiplayerClient)
         {
             // Send packet to server — server spawns the NPC and syncs to all clients
-            DB.SendBagCreated(Mod, position.X, position.Y, Player.name, Player.whoAmI, inventory);
+            DB.SendBagCreated(Mod, position.X, position.Y, Player.name, Player.whoAmI, deathLoadoutIndex, inventory);
             Mod.Logger.Info($"[DeathBag] Sent BagCreated packet for {Player.name} with {inventory.Count} items");
             return;
         }
@@ -396,10 +410,11 @@ public sealed class DeathBagPlayer : ModPlayer
         {
             bagNPC.OwnerPlayerIndex = Player.whoAmI;
             bagNPC.OwnerName = Player.name;
+            bagNPC.DeathLoadoutIndex = deathLoadoutIndex;
             bagNPC.SavedInventory = inventory;
             npc.GivenName = $"{Player.name}'s Death Bag";
             npc.netUpdate = true;
-            Mod.Logger.Info($"[DeathBag] Bag NPC spawned (index {npcIndex}) for {Player.name} with {inventory.Count} items");
+            Mod.Logger.Info($"[DeathBag] Bag NPC spawned (index {npcIndex}) for {Player.name} with {inventory.Count} items, loadout {deathLoadoutIndex}");
         }
         else
         {

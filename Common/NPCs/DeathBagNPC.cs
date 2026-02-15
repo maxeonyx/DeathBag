@@ -30,6 +30,9 @@ public sealed class DeathBagNPC : ModNPC
     /// </summary>
     public List<(int SlotIndex, Item Item)> SavedInventory = new();
 
+    /// <summary>Which loadout was active when the player died. Needed to restore items to correct loadout arrays.</summary>
+    public int DeathLoadoutIndex;
+
     /// <summary>Whether the local player's mouse is currently over this NPC.</summary>
     private bool _mouseHovering;
 
@@ -203,6 +206,7 @@ public sealed class DeathBagNPC : ModNPC
     {
         writer.Write(OwnerName ?? "");
         writer.Write(OwnerPlayerIndex);
+        writer.Write(DeathLoadoutIndex);
         DB.WriteInventory(writer, SavedInventory);
     }
 
@@ -210,6 +214,7 @@ public sealed class DeathBagNPC : ModNPC
     {
         OwnerName = reader.ReadString();
         OwnerPlayerIndex = reader.ReadInt32();
+        DeathLoadoutIndex = reader.ReadInt32();
         SavedInventory = DB.ReadInventory(reader);
 
         if (!string.IsNullOrEmpty(OwnerName))

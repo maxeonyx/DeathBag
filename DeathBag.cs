@@ -41,12 +41,13 @@ public sealed class DeathBag : Mod
         float y = reader.ReadSingle();
         string ownerName = reader.ReadString();
         int ownerIndex = reader.ReadInt32();
+        int deathLoadoutIndex = reader.ReadInt32();
         var inventory = ReadInventory(reader);
 
         if (Main.netMode != NetmodeID.Server)
             return;
 
-        Logger.Info($"[DeathBag] Server: BagCreated from {ownerName} with {inventory.Count} items at ({x:F0}, {y:F0})");
+        Logger.Info($"[DeathBag] Server: BagCreated from {ownerName} with {inventory.Count} items at ({x:F0}, {y:F0}), loadout {deathLoadoutIndex}");
 
         int npcIndex = NPC.NewNPC(
             Terraria.Entity.GetSource_NaturalSpawn(),
@@ -64,6 +65,7 @@ public sealed class DeathBag : Mod
         {
             bagNPC.OwnerName = ownerName;
             bagNPC.OwnerPlayerIndex = ownerIndex;
+            bagNPC.DeathLoadoutIndex = deathLoadoutIndex;
             bagNPC.SavedInventory = inventory;
             npc.GivenName = $"{ownerName}'s Death Bag";
 
@@ -94,7 +96,7 @@ public sealed class DeathBag : Mod
     /// Sends BagCreated packet from client to server.
     /// </summary>
     internal static void SendBagCreated(Mod mod, float x, float y, string ownerName, int ownerIndex,
-        List<(int SlotIndex, Item Item)> inventory)
+        int deathLoadoutIndex, List<(int SlotIndex, Item Item)> inventory)
     {
         var packet = mod.GetPacket();
         packet.Write((byte)MessageType.BagCreated);
@@ -102,6 +104,7 @@ public sealed class DeathBag : Mod
         packet.Write(y);
         packet.Write(ownerName);
         packet.Write(ownerIndex);
+        packet.Write(deathLoadoutIndex);
         WriteInventory(packet, inventory);
         packet.Send(); // to server
     }

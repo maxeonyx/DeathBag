@@ -29,6 +29,7 @@ public sealed class DeathBagState : ModSystem
                 ["y"] = npc.position.Y,
                 ["ownerIndex"] = bag.OwnerPlayerIndex,
                 ["ownerName"] = bag.OwnerName,
+                ["deathLoadout"] = bag.DeathLoadoutIndex,
             };
 
             // Serialize inventory
@@ -59,6 +60,7 @@ public sealed class DeathBagState : ModSystem
     {
         public float X, Y;
         public string OwnerName = "";
+        public int DeathLoadoutIndex;
         public List<(int SlotIndex, Item Item)> Inventory = new();
     }
 
@@ -78,6 +80,7 @@ public sealed class DeathBagState : ModSystem
                 X = bagTag.GetFloat("x"),
                 Y = bagTag.GetFloat("y"),
                 OwnerName = bagTag.GetString("ownerName"),
+                DeathLoadoutIndex = bagTag.ContainsKey("deathLoadout") ? bagTag.GetInt("deathLoadout") : 0,
             };
 
             if (bagTag.ContainsKey("items"))
@@ -125,6 +128,7 @@ public sealed class DeathBagState : ModSystem
             bagNPC.OwnerName = data.OwnerName;
             bagNPC.OwnerPlayerIndex = ResolvePlayerIndex(data.OwnerName);
             bagNPC.SavedInventory = data.Inventory;
+            bagNPC.DeathLoadoutIndex = data.DeathLoadoutIndex;
             npc.GivenName = $"{data.OwnerName}'s Death Bag";
             npc.netUpdate = true;
         }
