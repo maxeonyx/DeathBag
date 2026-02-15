@@ -1,4 +1,4 @@
 displayName = Death Bag
 author = maxeonyx
-version = 0.1.34
+version = 0.1.35
 homepage = https://github.com/maxeonyx/DeathBag
