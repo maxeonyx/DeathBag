@@ -123,29 +123,32 @@ public sealed class DeathBagPlayer : ModPlayer
         // Collect current items from ALL arrays that need re-absorption
         var currentItems = new List<Item>();
 
-        void CollectCurrent(Item[] array, int baseSlot)
+        void CollectCurrent(Item[] array, int baseSlot, string label)
         {
             for (int i = 0; i < array.Length; i++)
             {
                 Item item = array[i];
                 if (item is not null && !item.IsAir)
+                {
                     currentItems.Add(item.Clone());
+                    Mod.Logger.Debug($"[DeathBag] Collect {label}[{i}] (slot {baseSlot + i}): {item.Name} x{item.stack}");
+                }
             }
         }
 
-        CollectCurrent(Player.inventory, 0);
-        CollectCurrent(Player.armor, SlotArmor);
-        CollectCurrent(Player.dye, SlotDye);
-        CollectCurrent(Player.miscEquips, SlotMiscEquips);
-        CollectCurrent(Player.miscDyes, SlotMiscDyes);
+        CollectCurrent(Player.inventory, 0, "inventory");
+        CollectCurrent(Player.armor, SlotArmor, "armor");
+        CollectCurrent(Player.dye, SlotDye, "dye");
+        CollectCurrent(Player.miscEquips, SlotMiscEquips, "miscEquips");
+        CollectCurrent(Player.miscDyes, SlotMiscDyes, "miscDyes");
 
         for (int l = 0; l < Player.Loadouts.Length; l++)
         {
             if (l == Player.CurrentLoadoutIndex)
                 continue;
             int loadoutBase = SlotLoadoutsStart + l * LoadoutSize;
-            CollectCurrent(Player.Loadouts[l].Armor, loadoutBase);
-            CollectCurrent(Player.Loadouts[l].Dye, loadoutBase + 20);
+            CollectCurrent(Player.Loadouts[l].Armor, loadoutBase, $"loadout{l}.Armor");
+            CollectCurrent(Player.Loadouts[l].Dye, loadoutBase + 20, $"loadout{l}.Dye");
         }
 
         Mod.Logger.Info($"[DeathBag] Step 2: {currentItems.Count} current items to re-absorb");
@@ -307,21 +310,25 @@ public sealed class DeathBagPlayer : ModPlayer
     {
         var snapshot = new List<(int, Item)>();
 
-        void Snap(Item[] array, int baseSlot)
+        void Snap(Item[] array, int baseSlot, string label)
         {
             for (int i = 0; i < array.Length; i++)
             {
                 Item item = array[i];
                 if (item is not null && !item.IsAir)
+                {
                     snapshot.Add((baseSlot + i, item.Clone()));
+                    Mod.Logger.Debug($"[DeathBag] Snapshot {label}[{i}] (slot {baseSlot + i}): {item.Name} x{item.stack}");
+                }
             }
         }
 
-        Snap(Player.inventory, 0);
-        Snap(Player.armor, SlotArmor);
-        Snap(Player.dye, SlotDye);
-        Snap(Player.miscEquips, SlotMiscEquips);
-        Snap(Player.miscDyes, SlotMiscDyes);
+        Mod.Logger.Info($"[DeathBag] Snapshot: CurrentLoadoutIndex={Player.CurrentLoadoutIndex}, Loadouts.Length={Player.Loadouts.Length}");
+        Snap(Player.inventory, 0, "inventory");
+        Snap(Player.armor, SlotArmor, "armor");
+        Snap(Player.dye, SlotDye, "dye");
+        Snap(Player.miscEquips, SlotMiscEquips, "miscEquips");
+        Snap(Player.miscDyes, SlotMiscDyes, "miscDyes");
 
         // Inactive loadouts (active loadout's items are already in Player.armor/dye)
         for (int l = 0; l < Player.Loadouts.Length; l++)
@@ -330,8 +337,8 @@ public sealed class DeathBagPlayer : ModPlayer
                 continue;
 
             int loadoutBase = SlotLoadoutsStart + l * LoadoutSize;
-            Snap(Player.Loadouts[l].Armor, loadoutBase);
-            Snap(Player.Loadouts[l].Dye, loadoutBase + 20);
+            Snap(Player.Loadouts[l].Armor, loadoutBase, $"loadout{l}.Armor");
+            Snap(Player.Loadouts[l].Dye, loadoutBase + 20, $"loadout{l}.Dye");
         }
 
         return snapshot;

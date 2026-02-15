@@ -53,8 +53,8 @@ public sealed class DeathBagNPC : ModNPC
     {
         NPC.friendly = true;
         NPC.townNPC = false;
-        NPC.width = 24;
-        NPC.height = 24;
+        NPC.width = 40;
+        NPC.height = 40;
         NPC.aiStyle = -1;
         NPC.damage = 0;
         NPC.defense = 0;
