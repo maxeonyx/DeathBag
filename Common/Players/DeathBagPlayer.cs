@@ -51,8 +51,10 @@ public sealed class DeathBagPlayer : ModPlayer
             return true;
         }
 
-        // Clear inventory so vanilla's DropItems finds nothing to scatter
-        ClearInventory();
+        // Clear inventory so vanilla's DropItems finds nothing to scatter —
+        // EXCEPT DeathBagItems (carried bags), which vanilla will drop naturally.
+        // DeathBagItem.Update() converts them back to bag NPCs on the ground.
+        ClearInventory(preserveBagItems: true);
 
         return true;
     }
@@ -67,25 +69,10 @@ public sealed class DeathBagPlayer : ModPlayer
         var snapshot = _deathSnapshot;
         _deathSnapshot = null;
 
-        // Extract any carried bag items (someone else's bags) — these become separate bag NPCs,
-        // not nested inside the carrier's bag.
-        var carriedBags = new List<Items.DeathBagItem>();
-        snapshot.RemoveAll(entry =>
-        {
-            if (entry.Item.ModItem is Items.DeathBagItem bagItem)
-            {
-                carriedBags.Add(bagItem);
-                Mod.Logger.Info($"[DeathBag] Extracting carried bag for {bagItem.OwnerName} from death snapshot");
-                return true;
-            }
-            return false;
-        });
-
-        // Spawn carried bags as separate bag NPCs at death location
-        foreach (var carriedBag in carriedBags)
-        {
-            SpawnBagNPC(Player.Center, carriedBag.SavedInventory, carriedBag.DeathLoadoutIndex, carriedBag.OwnerName);
-        }
+        // Remove any carried DeathBagItems from the snapshot — they'll be dropped
+        // by vanilla Mediumcore scatter, and DeathBagItem.Update() will convert
+        // them back to bag NPCs on the ground.
+        snapshot.RemoveAll(entry => entry.Item.ModItem is Items.DeathBagItem);
 
         // Spawn carrier's own bag (if anything remains)
         if (snapshot.Count > 0)
@@ -385,12 +372,16 @@ public sealed class DeathBagPlayer : ModPlayer
         return snapshot;
     }
 
-    private void ClearInventory()
+    private void ClearInventory(bool preserveBagItems = false)
     {
         void Clear(Item[] array)
         {
             for (int i = 0; i < array.Length; i++)
+            {
+                if (preserveBagItems && array[i]?.ModItem is Items.DeathBagItem)
+                    continue;
                 array[i] = new Item();
+            }
         }
 
         Clear(Player.inventory);

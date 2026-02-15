@@ -3,6 +3,7 @@ using System.IO;
 using Terraria;
 using Terraria.ID;
 using Terraria.ModLoader;
+using DeathBag.Common.Items;
 using DeathBag.Common.NPCs;
 
 namespace DeathBag;
@@ -15,6 +16,8 @@ public sealed class DeathBag : Mod
         BagCreated,
         /// <summary>Client -> server: player restored their bag, remove it.</summary>
         BagRemoved,
+        /// <summary>Client -> server: non-owner picked up bag NPC, convert to DeathBagItem world entity.</summary>
+        BagToItem,
     }
 
     public override void HandlePacket(BinaryReader reader, int whoAmI)
@@ -28,6 +31,9 @@ public sealed class DeathBag : Mod
                 break;
             case MessageType.BagRemoved:
                 HandleBagRemoved(reader, whoAmI);
+                break;
+            case MessageType.BagToItem:
+                HandleBagToItem(reader, whoAmI);
                 break;
             default:
                 Logger.Warn($"[DeathBag] Unknown packet type: {msgType}");
@@ -92,6 +98,66 @@ public sealed class DeathBag : Mod
         }
     }
 
+    private void HandleBagToItem(BinaryReader reader, int whoAmI)
+    {
+        int npcIndex = reader.ReadInt32();
+        string carrierName = reader.ReadString();
+
+        if (Main.netMode != NetmodeID.Server)
+            return;
+
+        if (npcIndex < 0 || npcIndex >= Main.maxNPCs || !Main.npc[npcIndex].active
+            || Main.npc[npcIndex].ModNPC is not DeathBagNPC bagNPC)
+        {
+            Logger.Warn($"[DeathBag] Server: BagToItem for invalid NPC index {npcIndex}");
+            return;
+        }
+
+        // Find an empty inventory slot on the requesting player
+        Player carrier = Main.player[whoAmI];
+        int emptySlot = -1;
+        for (int i = 0; i < 50; i++) // Main inventory only (0-49)
+        {
+            if (carrier.inventory[i] == null || carrier.inventory[i].IsAir)
+            {
+                emptySlot = i;
+                break;
+            }
+        }
+
+        if (emptySlot < 0)
+        {
+            Logger.Info($"[DeathBag] Server: {carrierName} has no room for bag item");
+            // TODO: notify client "no room" — for now they see the local message
+            return;
+        }
+
+        NPC npc = Main.npc[npcIndex];
+
+        // Create the bag item directly in the player's inventory
+        var item = new Item();
+        item.SetDefaults(ModContent.ItemType<DeathBagItem>());
+        if (item.ModItem is DeathBagItem bagItem)
+        {
+            bagItem.OwnerName = bagNPC.OwnerName;
+            bagItem.DeathLoadoutIndex = bagNPC.DeathLoadoutIndex;
+            bagItem.SavedInventory = bagNPC.SavedInventory;
+            bagItem.CarrierName = carrierName;
+        }
+        item.SetNameOverride($"{bagNPC.OwnerName}'s Death Bag");
+        carrier.inventory[emptySlot] = item;
+
+        // Sync the inventory slot to all clients
+        NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, whoAmI, emptySlot);
+
+        Logger.Info($"[DeathBag] Server: placed {bagNPC.OwnerName}'s bag in {carrierName}'s inventory slot {emptySlot}");
+
+        // Remove the NPC
+        npc.active = false;
+        npc.netUpdate = true;
+        NetMessage.SendData(MessageID.SyncNPC, -1, -1, null, npcIndex);
+    }
+
     /// <summary>
     /// Sends BagCreated packet from client to server.
     /// </summary>
@@ -117,6 +183,19 @@ public sealed class DeathBag : Mod
         var packet = mod.GetPacket();
         packet.Write((byte)MessageType.BagRemoved);
         packet.Write(npcIndex);
+        packet.Send(); // to server
+    }
+
+    /// <summary>
+    /// Sends BagToItem packet from client to server.
+    /// Server will remove the bag NPC and spawn a DeathBagItem world entity.
+    /// </summary>
+    internal static void SendBagToItem(Mod mod, int npcIndex, string carrierName)
+    {
+        var packet = mod.GetPacket();
+        packet.Write((byte)MessageType.BagToItem);
+        packet.Write(npcIndex);
+        packet.Write(carrierName);
         packet.Send(); // to server
     }
 

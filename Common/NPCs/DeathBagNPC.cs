@@ -172,55 +172,45 @@ public sealed class DeathBagNPC : ModNPC
 
         Player localPlayer = Main.LocalPlayer;
 
-        // Find an empty inventory slot for the bag item
-        int emptySlot = -1;
-        for (int i = 0; i < 50; i++) // Main inventory only (0-49), skip ammo/coin slots
-        {
-            if (localPlayer.inventory[i] == null || localPlayer.inventory[i].IsAir)
-            {
-                emptySlot = i;
-                break;
-            }
-        }
-
-        if (emptySlot < 0)
-        {
-            Main.NewText("No room in your inventory!", Color.Yellow);
-            return;
-        }
-
-        // Create the bag item directly in the player's inventory
-        var item = new Item();
-        item.SetDefaults(ModContent.ItemType<Items.DeathBagItem>());
-        if (item.ModItem is Items.DeathBagItem bagItem)
-        {
-            bagItem.OwnerName = OwnerName;
-            bagItem.DeathLoadoutIndex = DeathLoadoutIndex;
-            bagItem.SavedInventory = SavedInventory;
-            bagItem.CarrierName = localPlayer.name;
-        }
-        item.SetNameOverride($"{OwnerName}'s Death Bag");
-        localPlayer.inventory[emptySlot] = item;
-
-        // Sync the inventory slot to server
         if (Main.netMode == NetmodeID.MultiplayerClient)
         {
-            NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, localPlayer.whoAmI, emptySlot);
-        }
-
-        Mod.Logger.Info($"[DeathBag] {localPlayer.name} picked up {OwnerName}'s bag as item (slot {emptySlot}, {SavedInventory.Count} items)");
-
-        // Remove the bag NPC
-        SavedInventory.Clear(); // Prevent any further interaction
-        if (Main.netMode == NetmodeID.MultiplayerClient)
-        {
-            DB.SendBagRemoved(Mod, NPC.whoAmI);
+            DB.SendBagToItem(Mod, NPC.whoAmI, localPlayer.name);
         }
         else
         {
+            // Singleplayer: place item directly in player's inventory
+            int emptySlot = -1;
+            for (int i = 0; i < 50; i++)
+            {
+                if (localPlayer.inventory[i] == null || localPlayer.inventory[i].IsAir)
+                {
+                    emptySlot = i;
+                    break;
+                }
+            }
+
+            if (emptySlot < 0)
+            {
+                Main.NewText("No room in your inventory!", Color.Yellow);
+                return;
+            }
+
+            var item = new Item();
+            item.SetDefaults(ModContent.ItemType<Items.DeathBagItem>());
+            if (item.ModItem is Items.DeathBagItem bagItem)
+            {
+                bagItem.OwnerName = OwnerName;
+                bagItem.DeathLoadoutIndex = DeathLoadoutIndex;
+                bagItem.SavedInventory = SavedInventory;
+                bagItem.CarrierName = localPlayer.name;
+            }
+            item.SetNameOverride($"{OwnerName}'s Death Bag");
+            localPlayer.inventory[emptySlot] = item;
+
             NPC.active = false;
         }
 
+        Mod.Logger.Info($"[DeathBag] {localPlayer.name} picked up {OwnerName}'s bag ({SavedInventory.Count} items)");
         Main.NewText($"Picked up {OwnerName}'s bag.", Color.Green);
 
         // Close chat UI
