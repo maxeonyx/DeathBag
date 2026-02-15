@@ -71,7 +71,8 @@ public sealed class DeathBagNPC : ModNPC
 
     public override void AI()
     {
-        NPC.velocity.X = 0f;
+        // Apply friction so bags settle after push-apart, but don't zero instantly
+        NPC.velocity.X *= 0.9f;
         PushApartFromOtherBags();
 
         // Continuously resolve owner index from name (handles join/leave, index changes)
@@ -278,8 +279,8 @@ public sealed class DeathBagNPC : ModNPC
 
     private void PushApartFromOtherBags()
     {
-        const float pushRadius = 32f;
-        const float pushStrength = 0.5f;
+        const float pushRadius = 48f;
+        const float pushStrength = 1.5f;
 
         for (int i = 0; i < Main.maxNPCs; i++)
         {
@@ -293,7 +294,7 @@ public sealed class DeathBagNPC : ModNPC
             if (distBetween < pushRadius && distBetween > 0.01f)
             {
                 Vector2 push = Vector2.Normalize(diff) * pushStrength * (1f - distBetween / pushRadius);
-                NPC.position += push;
+                NPC.velocity.X += push.X;
             }
         }
     }
