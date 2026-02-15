@@ -140,6 +140,29 @@ public sealed class DeathBagPlayer : ModPlayer
 
         Mod.Logger.Info($"[DeathBag] Step 2: {currentItems.Count} current items to re-absorb");
 
+        // Deduplicate copper starter tools — these respawn on death and pile up.
+        // If the saved inventory already has one, discard the current copy.
+        var copperTools = new HashSet<int>
+        {
+            ItemID.CopperShortsword,
+            ItemID.CopperPickaxe,
+            ItemID.CopperAxe,
+        };
+
+        var savedTypes = new HashSet<int>();
+        foreach (var (_, savedItem) in bag.SavedInventory)
+            savedTypes.Add(savedItem.type);
+
+        currentItems.RemoveAll(item =>
+        {
+            if (copperTools.Contains(item.type) && savedTypes.Contains(item.type))
+            {
+                Mod.Logger.Info($"[DeathBag] Dedup: discarding extra {item.Name}");
+                return true;
+            }
+            return false;
+        });
+
         // Re-absorb current items into inventory slots (0-58) only.
         // Equipment slots are exact-position — we don't stuff adventure pickups into armor slots.
         int invSlots = Player.inventory.Length; // 59

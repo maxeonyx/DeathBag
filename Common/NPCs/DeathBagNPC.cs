@@ -11,7 +11,8 @@ namespace DeathBag.Common.NPCs;
 
 /// <summary>
 /// The bag entity that appears at the player's death location.
-/// A friendly, stationary, immortal ModNPC with direct right-click interaction (no chat UI).
+/// Owner's bag: auto-pickup like an item (magnet pull + restore on contact).
+/// Other players' bags: right-click with chat UI confirmation.
 /// </summary>
 public sealed class DeathBagNPC : ModNPC
 {
@@ -29,6 +30,11 @@ public sealed class DeathBagNPC : ModNPC
 
     /// <summary>Whether the local player's mouse is currently over this NPC.</summary>
     private bool _mouseHovering;
+
+    // Item magnet constants (matches vanilla item pickup behavior)
+    private const float MagnetRange = 224f;  // ~14 tiles — range at which bag starts pulling toward owner
+    private const float PickupRange = 32f;   // contact range — triggers restore
+    private const float MagnetSpeed = 12f;   // pull speed in pixels/frame
 
     public override void SetStaticDefaults()
     {
@@ -66,54 +72,123 @@ public sealed class DeathBagNPC : ModNPC
         NPC.velocity.X = 0f;
         PushApartFromOtherBags();
 
-        // Client-side: handle hover and right-click interaction
+        // Client-side only: handle magnet pull for owner, hover for others
         if (Main.netMode == NetmodeID.Server)
             return;
 
         _mouseHovering = false;
 
-        // Check if local player's mouse is over this NPC
-        Vector2 mouseWorld = Main.MouseWorld;
-        Rectangle hitbox = NPC.Hitbox;
+        Player localPlayer = Main.LocalPlayer;
+        bool isOwner = localPlayer.whoAmI == OwnerPlayerIndex;
+        float dist = Vector2.Distance(localPlayer.Center, NPC.Center);
 
-        if (!hitbox.Contains(mouseWorld.ToPoint()))
+        // === OWNER: item-like magnet pull + auto-restore on contact ===
+        if (isOwner && !localPlayer.dead)
+        {
+            if (dist < PickupRange)
+            {
+                Mod.Logger.Info($"[DeathBag] Auto-pickup triggered for {localPlayer.name}");
+                localPlayer.GetModPlayer<Players.DeathBagPlayer>().RestoreFromBag(this);
+                return;
+            }
+
+            if (dist < MagnetRange)
+            {
+                // Fly toward player — ignore gravity and tiles during pull
+                NPC.noGravity = true;
+                NPC.noTileCollide = true;
+
+                Vector2 direction = localPlayer.Center - NPC.Center;
+                if (direction.Length() > 1f)
+                {
+                    direction.Normalize();
+                    NPC.velocity = direction * MagnetSpeed;
+                }
+            }
+            else
+            {
+                // Not in range — normal physics
+                NPC.noGravity = false;
+                NPC.noTileCollide = false;
+            }
+        }
+        else
+        {
+            // Not owner or owner is dead — normal physics
+            NPC.noGravity = false;
+            NPC.noTileCollide = false;
+        }
+
+        // === HOVER TEXT (both owner and non-owner) ===
+        Vector2 mouseWorld = Main.MouseWorld;
+        if (!NPC.Hitbox.Contains(mouseWorld.ToPoint()))
             return;
 
-        // Check player is close enough to interact (same range as NPC chat: ~192 pixels / 12 tiles)
-        Player player = Main.LocalPlayer;
-        float dist = Vector2.Distance(player.Center, NPC.Center);
         if (dist > 192f)
             return;
 
         _mouseHovering = true;
 
-        // Show hover text
-        bool isOwner = player.whoAmI == OwnerPlayerIndex;
-        string hoverText = isOwner
-            ? $"{OwnerName}'s Bag [Right-click to restore]"
-            : $"{OwnerName}'s Bag";
-
-        Main.instance.MouseText(hoverText);
-
-        // Consume the right-click so Terraria doesn't try other interactions
-        if (Main.mouseRight && Main.mouseRightRelease)
-        {
-            Main.mouseRightRelease = false;
-
-            if (isOwner)
-            {
-                Mod.Logger.Info($"[DeathBag] Right-click restore triggered by {player.name}");
-                player.GetModPlayer<Players.DeathBagPlayer>().RestoreFromBag(this);
-            }
-            else
-            {
-                Main.NewText($"This is {OwnerName}'s bag.", Color.Yellow);
-            }
-        }
+        if (isOwner)
+            Main.instance.MouseText($"{OwnerName}'s Bag");
+        else
+            Main.instance.MouseText($"{OwnerName}'s Bag [Right-click to deliver]");
     }
 
-    // Disable chat UI entirely — interaction is handled in AI()
-    public override bool CanChat() => false;
+    // Non-owners can right-click to open chat UI for confirmation
+    public override bool CanChat()
+    {
+        Player localPlayer = Main.LocalPlayer;
+        return localPlayer.whoAmI != OwnerPlayerIndex;
+    }
+
+    public override string GetChat()
+    {
+        return $"Deliver {OwnerName}'s bag to them?";
+    }
+
+    public override void SetChatButtons(ref string button1, ref string button2)
+    {
+        button1 = "Deliver";
+    }
+
+    public override void OnChatButtonClicked(bool firstButton, ref string shopName)
+    {
+        if (!firstButton)
+            return;
+
+        Player localPlayer = Main.LocalPlayer;
+
+        // Find the owner player
+        if (OwnerPlayerIndex < 0 || OwnerPlayerIndex >= Main.maxPlayers)
+        {
+            Main.NewText($"{OwnerName} is not in the game.", Color.Yellow);
+            return;
+        }
+
+        Player owner = Main.player[OwnerPlayerIndex];
+        if (owner == null || !owner.active)
+        {
+            Main.NewText($"{OwnerName} is not in the game.", Color.Yellow);
+            return;
+        }
+
+        // In singleplayer this shouldn't happen (you'd be the owner), but handle it
+        // In multiplayer, the restore runs on the owner's client — we need packets for that.
+        // For now (singleplayer-only), run restore directly.
+        if (Main.netMode == NetmodeID.SinglePlayer)
+        {
+            owner.GetModPlayer<Players.DeathBagPlayer>().RestoreFromBag(this);
+        }
+        else
+        {
+            // TODO: Send packet to owner's client to trigger restore
+            Main.NewText("Multiplayer bag delivery not yet implemented.", Color.Yellow);
+        }
+
+        // Close chat UI
+        Main.npcChatText = "";
+    }
 
     public override bool CheckActive()
     {
