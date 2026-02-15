@@ -70,7 +70,7 @@ public sealed class DeathBagItem : ModItem
     private void SpawnBagNPCFromItem()
     {
         int npcIndex = NPC.NewNPC(
-            Entity.GetSource_NaturalSpawn(),
+            Terraria.Entity.GetSource_NaturalSpawn(),
             (int)Item.position.X + Item.width / 2,
             (int)Item.position.Y + Item.height / 2,
             ModContent.NPCType<DeathBagNPC>());
