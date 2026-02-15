@@ -17,6 +17,12 @@ public sealed class DeathBagPlayer : ModPlayer
     /// </summary>
     private List<(int SlotIndex, Item Item)>? _deathSnapshot;
 
+    /// <summary>
+    /// NPC index to remove next tick (deferred to avoid crashing chat UI).
+    /// -1 means nothing pending.
+    /// </summary>
+    private int _pendingBagRemoval = -1;
+
     public override bool PreKill(double damage, int hitDirection, bool pvp, ref bool playSound,
         ref bool genDust, ref PlayerDeathReason damageSource)
     {
@@ -29,8 +35,11 @@ public sealed class DeathBagPlayer : ModPlayer
         // Snapshot the full inventory before death clears it
         _deathSnapshot = SnapshotInventory();
 
+        Mod.Logger.Info($"[DeathBag] PreKill: snapshotted {_deathSnapshot.Count} items for {Player.name}");
+
         if (_deathSnapshot.Count == 0)
         {
+            Mod.Logger.Info("[DeathBag] PreKill: empty inventory, no bag will spawn");
             _deathSnapshot = null;
             return true;
         }
@@ -52,7 +61,26 @@ public sealed class DeathBagPlayer : ModPlayer
         var snapshot = _deathSnapshot;
         _deathSnapshot = null;
 
+        Mod.Logger.Info($"[DeathBag] Kill: spawning bag with {snapshot.Count} items at ({Player.Center.X:F0}, {Player.Center.Y:F0})");
         SpawnBagNPC(Player.Center, snapshot);
+    }
+
+    public override void PostUpdate()
+    {
+        // Deferred bag removal — can't deactivate NPC during chat click handler
+        // because GUIChatDrawInner still references it that frame.
+        if (_pendingBagRemoval >= 0 && Player.whoAmI == Main.myPlayer)
+        {
+            int npcIndex = _pendingBagRemoval;
+            _pendingBagRemoval = -1;
+
+            if (npcIndex < Main.maxNPCs && Main.npc[npcIndex].active)
+            {
+                Mod.Logger.Info($"[DeathBag] Removing bag NPC (index {npcIndex}) on deferred tick");
+                Main.npc[npcIndex].active = false;
+                Main.npc[npcIndex].netUpdate = true;
+            }
+        }
     }
 
     /// <summary>
@@ -62,11 +90,18 @@ public sealed class DeathBagPlayer : ModPlayer
     public void RestoreFromBag(DeathBagNPC bag)
     {
         if (bag.SavedInventory.Count == 0)
+        {
+            Mod.Logger.Warn("[DeathBag] RestoreFromBag: bag has no items, skipping");
             return;
+        }
+
+        Mod.Logger.Info($"[DeathBag] RestoreFromBag: restoring {bag.SavedInventory.Count} saved items for {Player.name}");
 
         // === PLAN PHASE (no mutations) ===
 
         int totalSlots = Player.inventory.Length;
+        Mod.Logger.Info($"[DeathBag] Player inventory has {totalSlots} slots");
+
         Item[] result = new Item[totalSlots];
 
         // Initialize result with empty items
@@ -76,13 +111,22 @@ public sealed class DeathBagPlayer : ModPlayer
         }
 
         // Step 1: Saved items reclaim their exact slots
+        int restoredCount = 0;
+        int skippedCount = 0;
         foreach (var (slotIndex, savedItem) in bag.SavedInventory)
         {
             if (slotIndex >= 0 && slotIndex < totalSlots)
             {
                 result[slotIndex] = savedItem.Clone();
+                restoredCount++;
+            }
+            else
+            {
+                Mod.Logger.Warn($"[DeathBag] Saved item '{savedItem.Name}' has out-of-range slot {slotIndex} (max {totalSlots - 1}), dropping as overflow");
+                skippedCount++;
             }
         }
+        Mod.Logger.Info($"[DeathBag] Step 1: {restoredCount} items reclaimed slots, {skippedCount} skipped (out of range)");
 
         // Step 2: Collect current items that need re-absorption
         var currentItems = new List<Item>();
@@ -92,6 +136,7 @@ public sealed class DeathBagPlayer : ModPlayer
             if (current is not null && !current.IsAir)
                 currentItems.Add(current.Clone());
         }
+        Mod.Logger.Info($"[DeathBag] Step 2: {currentItems.Count} current items to re-absorb");
 
         // Step 3: Re-absorb current items — stack first, then empty slots
         var toDrop = new List<Item>();
@@ -132,10 +177,13 @@ public sealed class DeathBagPlayer : ModPlayer
                 Item overflow = current.Clone();
                 overflow.stack = remaining;
                 toDrop.Add(overflow);
+                Mod.Logger.Info($"[DeathBag] Overflow: {overflow.Name} x{remaining}");
             }
         }
 
         // === EXECUTE PHASE (single tick) ===
+
+        Mod.Logger.Info($"[DeathBag] Executing restore: {totalSlots} slots, {toDrop.Count} overflow items");
 
         // Overwrite inventory atomically
         for (int i = 0; i < totalSlots; i++)
@@ -149,10 +197,10 @@ public sealed class DeathBagPlayer : ModPlayer
             Player.QuickSpawnItem(Player.GetSource_Misc("DeathBagOverflow"), drop, drop.stack);
         }
 
-        // Remove the bag NPC
-        NPC npc = bag.NPC;
-        npc.active = false;
-        npc.netUpdate = true;
+        // Close chat UI first, then defer NPC removal to next tick
+        Main.npcChatText = "";
+        Player.SetTalkNPC(-1);
+        _pendingBagRemoval = bag.NPC.whoAmI;
 
         // Sync inventory to server
         if (Main.netMode == NetmodeID.MultiplayerClient)
@@ -164,6 +212,7 @@ public sealed class DeathBagPlayer : ModPlayer
         }
 
         Main.NewText("Inventory restored!", Color.Green);
+        Mod.Logger.Info("[DeathBag] Restore complete");
     }
 
     private List<(int SlotIndex, Item Item)> SnapshotInventory()
@@ -174,7 +223,10 @@ public sealed class DeathBagPlayer : ModPlayer
         {
             Item item = Player.inventory[i];
             if (item is not null && !item.IsAir)
+            {
                 snapshot.Add((i, item.Clone()));
+                Mod.Logger.Debug($"[DeathBag] Snapshot slot {i}: {item.Name} x{item.stack}");
+            }
         }
 
         return snapshot;
@@ -200,7 +252,10 @@ public sealed class DeathBagPlayer : ModPlayer
             ModContent.NPCType<DeathBagNPC>());
 
         if (npcIndex < 0 || npcIndex >= Main.maxNPCs)
+        {
+            Mod.Logger.Error($"[DeathBag] Failed to spawn bag NPC: NewNPC returned {npcIndex}");
             return;
+        }
 
         NPC npc = Main.npc[npcIndex];
         if (npc.ModNPC is DeathBagNPC bagNPC)
@@ -208,10 +263,11 @@ public sealed class DeathBagPlayer : ModPlayer
             bagNPC.OwnerPlayerIndex = Player.whoAmI;
             bagNPC.OwnerName = Player.name;
             bagNPC.SavedInventory = inventory;
+            Mod.Logger.Info($"[DeathBag] Bag NPC spawned (index {npcIndex}) for {Player.name} with {inventory.Count} items");
         }
-
-        // In multiplayer, the NPC spawn is synced automatically by tModLoader
-        // but we may need to send custom data (owner, inventory) via packet
-        // TODO: Send BagCreated packet with inventory data for multiplayer
+        else
+        {
+            Mod.Logger.Error($"[DeathBag] Spawned NPC at index {npcIndex} is not DeathBagNPC (type: {npc.ModNPC?.GetType().Name ?? "null"})");
+        }
     }
 }
