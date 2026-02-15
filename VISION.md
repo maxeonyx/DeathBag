@@ -88,6 +88,4 @@ Instead of spawning with copper tool items, tool slots have a special background
 
 ## Open Questions
 
-- **What tModLoader entity type should the bag be?** Needs: persistence, not a block, right-clickable, world position, drawable, per-player interaction control. Candidates: ModNPC (has right-click support), ModProjectile (temporary, probably wrong), custom ModSystem drawing (no entity physics). Implementation agent should research this.
-- **Exact packet design** depends on entity type choice.
 - **What "inventory" means exactly** — does it include armor slots, accessory slots, ammo slots, coins, or just the main inventory? Needs clarification or a sensible default (probably: everything Mediumcore normally drops).

@@ -13,6 +13,8 @@ DeathBag/
   Common/
     Config/
       DeathBagConfig.cs          <- ModConfig (server-side, ConfigScope.ServerSide)
+    NPCs/
+      DeathBagNPC.cs             <- ModNPC (bag entity — drawing, interaction, physics)
     Players/
       DeathBagPlayer.cs          <- ModPlayer (death interception, restore logic)
     Systems/
@@ -41,31 +43,22 @@ Read the Architecture section in the workspace `AGENTS.md` — it explains Terra
 - The client informs the server when a bag is created or restored
 - The server broadcasts bag presence to all clients
 
+## Architecture
+
+**Bag entity type: ModNPC.** See `PLAN.md` for the full rationale, research, implementation order, and test scenarios.
+
+Key components:
+
+| Class | Role |
+|---|---|
+| `DeathBagNPC : ModNPC` | Bag entity — drawing, interaction, position, sync |
+| `DeathBagPlayer : ModPlayer` | Death interception (`Kill` hook), inventory snapshot, restore logic (client-side) |
+| `DeathBagState : ModSystem` | Persistence — save/load bag data + inventory to world TagCompound, re-spawn NPCs on load |
+
 ## Implementation Workflow
 
-1. **Read VISION.md thoroughly** before starting — it has confirmed user stories and open questions
-2. **Research the entity type question first** — what tModLoader type should the bag be? This is the key architectural decision. Document your choice and reasoning.
-3. **One feature at a time**, in this order:
-   - Bag entity type + basic spawning (no inventory yet)
-   - Death interception + inventory snapshot
-   - Restore mechanic (plan-then-execute)
-   - Multiplayer sync
-   - Persistence (world save/load)
-   - Bag visuals and hover text
-   - Bag physics (push apart)
-4. **Commit after each feature** — small, working increments
-5. **Deploy and test in-game** after each feature: `& "$env:USERPROFILE\terraria-mods\deploy.ps1" -Mod DeathBag`
-6. **Update VISION.md** when you resolve open questions or discover new ones
-
-## Testing
-
-No automated test framework — this is a tModLoader mod. Testing is manual, in-game.
-
-Test scenarios to verify:
-- Die on Mediumcore → bag appears, no items scattered
-- Right-click bag → inventory restored to exact slots
-- Die with torches, pick up more torches, restore → stacks merge correctly
-- Die twice → two bags, each restorable independently
-- Multiplayer: see teammate's bag, can't interact, hover shows name
-- Log out and back in → bags reappear
-- Die on Softcore → no bag (mod inactive)
+1. **Read VISION.md** for requirements, **PLAN.md** for architecture decisions and test scenarios
+2. **One feature at a time** — see implementation order in `PLAN.md`
+3. **Commit after each feature** — small, working increments
+4. **Deploy and test in-game** after each feature: `& "$env:USERPROFILE\terraria-mods\deploy.ps1" -Mod DeathBag`
+5. **Update VISION.md** when you resolve open questions or discover new ones
