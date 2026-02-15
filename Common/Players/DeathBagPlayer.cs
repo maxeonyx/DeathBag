@@ -64,12 +64,35 @@ public sealed class DeathBagPlayer : ModPlayer
         if (Player.whoAmI != Main.myPlayer)
             return;
 
-        // Spawn bag NPC at death location
         var snapshot = _deathSnapshot;
         _deathSnapshot = null;
 
-        Mod.Logger.Info($"[DeathBag] Kill: spawning bag with {snapshot.Count} items at ({Player.Center.X:F0}, {Player.Center.Y:F0}), loadout {_deathLoadoutIndex}");
-        SpawnBagNPC(Player.Center, snapshot, _deathLoadoutIndex);
+        // Extract any carried bag items (someone else's bags) — these become separate bag NPCs,
+        // not nested inside the carrier's bag.
+        var carriedBags = new List<Items.DeathBagItem>();
+        snapshot.RemoveAll(entry =>
+        {
+            if (entry.Item.ModItem is Items.DeathBagItem bagItem)
+            {
+                carriedBags.Add(bagItem);
+                Mod.Logger.Info($"[DeathBag] Extracting carried bag for {bagItem.OwnerName} from death snapshot");
+                return true;
+            }
+            return false;
+        });
+
+        // Spawn carried bags as separate bag NPCs at death location
+        foreach (var carriedBag in carriedBags)
+        {
+            SpawnBagNPC(Player.Center, carriedBag.SavedInventory, carriedBag.DeathLoadoutIndex, carriedBag.OwnerName);
+        }
+
+        // Spawn carrier's own bag (if anything remains)
+        if (snapshot.Count > 0)
+        {
+            Mod.Logger.Info($"[DeathBag] Kill: spawning bag with {snapshot.Count} items at ({Player.Center.X:F0}, {Player.Center.Y:F0}), loadout {_deathLoadoutIndex}");
+            SpawnBagNPC(Player.Center, snapshot, _deathLoadoutIndex);
+        }
     }
 
     public override void PostUpdate()
@@ -300,6 +323,10 @@ public sealed class DeathBagPlayer : ModPlayer
         }
 
         Main.NewText("Inventory restored!", Color.Green);
+        if (!string.IsNullOrEmpty(bag.DeliveredBy))
+        {
+            Main.NewText($"Delivered by {bag.DeliveredBy}!", Color.LightGreen);
+        }
         Mod.Logger.Info("[DeathBag] Restore complete");
     }
 
@@ -382,13 +409,16 @@ public sealed class DeathBagPlayer : ModPlayer
         }
     }
 
-    private void SpawnBagNPC(Vector2 position, List<(int SlotIndex, Item Item)> inventory, int deathLoadoutIndex)
+    private void SpawnBagNPC(Vector2 position, List<(int SlotIndex, Item Item)> inventory, int deathLoadoutIndex,
+        string? ownerNameOverride = null)
     {
+        string ownerName = ownerNameOverride ?? Player.name;
+
         if (Main.netMode == NetmodeID.MultiplayerClient)
         {
             // Send packet to server — server spawns the NPC and syncs to all clients
-            DB.SendBagCreated(Mod, position.X, position.Y, Player.name, Player.whoAmI, deathLoadoutIndex, inventory);
-            Mod.Logger.Info($"[DeathBag] Sent BagCreated packet for {Player.name} with {inventory.Count} items");
+            DB.SendBagCreated(Mod, position.X, position.Y, ownerName, Player.whoAmI, deathLoadoutIndex, inventory);
+            Mod.Logger.Info($"[DeathBag] Sent BagCreated packet for {ownerName} with {inventory.Count} items");
             return;
         }
 
@@ -408,13 +438,14 @@ public sealed class DeathBagPlayer : ModPlayer
         NPC npc = Main.npc[npcIndex];
         if (npc.ModNPC is DeathBagNPC bagNPC)
         {
-            bagNPC.OwnerPlayerIndex = Player.whoAmI;
-            bagNPC.OwnerName = Player.name;
+            bagNPC.OwnerPlayerIndex = -1; // Will be resolved by ResolveOwnerIndex
+            bagNPC.OwnerName = ownerName;
             bagNPC.DeathLoadoutIndex = deathLoadoutIndex;
             bagNPC.SavedInventory = inventory;
-            npc.GivenName = $"{Player.name}'s Death Bag";
+            npc.GivenName = $"{ownerName}'s Death Bag";
             npc.netUpdate = true;
-            Mod.Logger.Info($"[DeathBag] Bag NPC spawned (index {npcIndex}) for {Player.name} with {inventory.Count} items, loadout {deathLoadoutIndex}");
+            bagNPC.ResolveOwnerIndex();
+            Mod.Logger.Info($"[DeathBag] Bag NPC spawned (index {npcIndex}) for {ownerName} with {inventory.Count} items, loadout {deathLoadoutIndex}");
         }
         else
         {

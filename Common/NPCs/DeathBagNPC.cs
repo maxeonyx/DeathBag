@@ -33,6 +33,13 @@ public sealed class DeathBagNPC : ModNPC
     /// <summary>Which loadout was active when the player died. Needed to restore items to correct loadout arrays.</summary>
     public int DeathLoadoutIndex;
 
+    /// <summary>
+    /// Name of the player who carried this bag as an item and dropped it.
+    /// Empty if the bag was never picked up by a non-owner.
+    /// Used for delivery chat messages.
+    /// </summary>
+    public string DeliveredBy = "";
+
     /// <summary>Whether the local player's mouse is currently over this NPC.</summary>
     private bool _mouseHovering;
 
@@ -131,32 +138,31 @@ public sealed class DeathBagNPC : ModNPC
         else
         {
             string label = string.IsNullOrEmpty(OwnerName) ? "Unknown Player's Bag" : $"{OwnerName}'s Bag";
-            if (OwnerPlayerIndex >= 0)
-                label += " [Right-click to deliver]";
+            label += " [Right-click to pick up]";
             Main.instance.MouseText(label);
         }
     }
 
-    // Non-owners can right-click to open chat UI for confirmation
+    // Non-owners can right-click to pick up the bag as an inventory item
     public override bool CanChat()
     {
         Player localPlayer = Main.LocalPlayer;
         // Owner picks up automatically — no chat needed
         if (OwnerPlayerIndex >= 0 && localPlayer.whoAmI == OwnerPlayerIndex)
             return false;
-        // Non-owners can chat to deliver (only if owner is online)
-        return OwnerPlayerIndex >= 0;
+        // Non-owners can always pick up (even if owner is offline — carry it for later)
+        return true;
     }
 
     public override string GetChat()
     {
         string name = string.IsNullOrEmpty(OwnerName) ? "Unknown Player" : OwnerName;
-        return $"Deliver {name}'s bag to them?";
+        return $"Pick up {name}'s bag?";
     }
 
     public override void SetChatButtons(ref string button1, ref string button2)
     {
-        button1 = "Deliver";
+        button1 = "Pick Up";
     }
 
     public override void OnChatButtonClicked(bool firstButton, ref string shopName)
@@ -166,32 +172,56 @@ public sealed class DeathBagNPC : ModNPC
 
         Player localPlayer = Main.LocalPlayer;
 
-        // Find the owner player
-        if (OwnerPlayerIndex < 0 || OwnerPlayerIndex >= Main.maxPlayers)
+        // Find an empty inventory slot for the bag item
+        int emptySlot = -1;
+        for (int i = 0; i < 50; i++) // Main inventory only (0-49), skip ammo/coin slots
         {
-            Main.NewText($"{OwnerName} is not in the game.", Color.Yellow);
+            if (localPlayer.inventory[i] == null || localPlayer.inventory[i].IsAir)
+            {
+                emptySlot = i;
+                break;
+            }
+        }
+
+        if (emptySlot < 0)
+        {
+            Main.NewText("No room in your inventory!", Color.Yellow);
             return;
         }
 
-        Player owner = Main.player[OwnerPlayerIndex];
-        if (owner == null || !owner.active)
+        // Create the bag item directly in the player's inventory
+        var item = new Item();
+        item.SetDefaults(ModContent.ItemType<Items.DeathBagItem>());
+        if (item.ModItem is Items.DeathBagItem bagItem)
         {
-            Main.NewText($"{OwnerName} is not in the game.", Color.Yellow);
-            return;
+            bagItem.OwnerName = OwnerName;
+            bagItem.DeathLoadoutIndex = DeathLoadoutIndex;
+            bagItem.SavedInventory = SavedInventory;
+            bagItem.CarrierName = localPlayer.name;
+        }
+        item.SetNameOverride($"{OwnerName}'s Death Bag");
+        localPlayer.inventory[emptySlot] = item;
+
+        // Sync the inventory slot to server
+        if (Main.netMode == NetmodeID.MultiplayerClient)
+        {
+            NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, localPlayer.whoAmI, emptySlot);
         }
 
-        // In singleplayer this shouldn't happen (you'd be the owner), but handle it
-        // In multiplayer, the restore runs on the owner's client — we need packets for that.
-        // For now (singleplayer-only), run restore directly.
-        if (Main.netMode == NetmodeID.SinglePlayer)
+        Mod.Logger.Info($"[DeathBag] {localPlayer.name} picked up {OwnerName}'s bag as item (slot {emptySlot}, {SavedInventory.Count} items)");
+
+        // Remove the bag NPC
+        SavedInventory.Clear(); // Prevent any further interaction
+        if (Main.netMode == NetmodeID.MultiplayerClient)
         {
-            owner.GetModPlayer<Players.DeathBagPlayer>().RestoreFromBag(this);
+            DB.SendBagRemoved(Mod, NPC.whoAmI);
         }
         else
         {
-            // TODO: Send packet to owner's client to trigger restore
-            Main.NewText("Multiplayer bag delivery not yet implemented.", Color.Yellow);
+            NPC.active = false;
         }
+
+        Main.NewText($"Picked up {OwnerName}'s bag.", Color.Green);
 
         // Close chat UI
         Main.npcChatText = "";
@@ -207,6 +237,7 @@ public sealed class DeathBagNPC : ModNPC
         writer.Write(OwnerName ?? "");
         writer.Write(OwnerPlayerIndex);
         writer.Write(DeathLoadoutIndex);
+        writer.Write(DeliveredBy ?? "");
         DB.WriteInventory(writer, SavedInventory);
     }
 
@@ -215,6 +246,7 @@ public sealed class DeathBagNPC : ModNPC
         OwnerName = reader.ReadString();
         OwnerPlayerIndex = reader.ReadInt32();
         DeathLoadoutIndex = reader.ReadInt32();
+        DeliveredBy = reader.ReadString();
         SavedInventory = DB.ReadInventory(reader);
 
         if (!string.IsNullOrEmpty(OwnerName))
@@ -243,7 +275,7 @@ public sealed class DeathBagNPC : ModNPC
             Vector2.One);
     }
 
-    private void ResolveOwnerIndex()
+    internal void ResolveOwnerIndex()
     {
         // If we have a name, try to find the matching player
         if (string.IsNullOrEmpty(OwnerName))
