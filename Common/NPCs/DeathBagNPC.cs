@@ -62,8 +62,8 @@ public sealed class DeathBagNPC : ModNPC
         NPC.HitSound = null;
         NPC.DeathSound = null;
         NPC.knockBackResist = 0f;
-        NPC.noGravity = false;
-        NPC.noTileCollide = false;
+        NPC.noGravity = true;
+        NPC.noTileCollide = true;
         NPC.dontTakeDamage = true;
         NPC.immortal = true;
         NPC.netAlways = true;
@@ -71,8 +71,12 @@ public sealed class DeathBagNPC : ModNPC
 
     public override void AI()
     {
-        // Apply friction so bags settle after push-apart, but don't zero instantly
-        NPC.velocity.X *= 0.9f;
+        // Gentle hover bob (position-based, not velocity-based, so friction doesn't interfere)
+        // Each bag gets a unique phase offset from whoAmI so they don't bob in sync
+        NPC.position.Y += (float)Math.Sin(Main.GameUpdateCount * 0.04f + NPC.whoAmI * 1.7f) * 0.3f;
+
+        // Apply friction so bags settle after push-apart, but don't drift forever
+        NPC.velocity *= 0.9f;
         PushApartFromOtherBags();
 
         // Continuously resolve owner index from name (handles join/leave, index changes)
@@ -100,10 +104,6 @@ public sealed class DeathBagNPC : ModNPC
 
             if (dist < MagnetRange)
             {
-                // Fly toward player — ignore gravity and tiles during pull
-                NPC.noGravity = true;
-                NPC.noTileCollide = true;
-
                 Vector2 direction = localPlayer.Center - NPC.Center;
                 if (direction.Length() > 1f)
                 {
@@ -111,18 +111,6 @@ public sealed class DeathBagNPC : ModNPC
                     NPC.velocity = direction * MagnetSpeed;
                 }
             }
-            else
-            {
-                // Not in range — normal physics
-                NPC.noGravity = false;
-                NPC.noTileCollide = false;
-            }
-        }
-        else
-        {
-            // Not owner or owner is dead — normal physics
-            NPC.noGravity = false;
-            NPC.noTileCollide = false;
         }
 
         // === HOVER TEXT (both owner and non-owner) ===
