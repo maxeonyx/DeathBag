@@ -195,9 +195,11 @@ public sealed class DeathBagPlayer : ModPlayer
                 remaining -= canAdd;
             }
 
-            // Try placing in empty inventory slots
+            // Try placing in empty inventory slots (skip ammo 50-53 and coin 54-57 slots)
             for (int i = 0; i < invSlots && remaining > 0; i++)
             {
+                if (i >= 50 && i <= 57)
+                    continue;
                 if (result.ContainsKey(i))
                     continue;
 
