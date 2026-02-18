@@ -87,6 +87,22 @@ When the carrier drops a bag item (right-click drop), it converts back to a norm
 
 ## Stretch Goals
 
+### Death Bag Restore Swaps Current Inventory Into a Bag
+
+> "Right now, when you pick up a death bag, it works really well. But your loadout bag is kind of used up at that point. And you've got to do a whole bunch of inventory management to get your loadout bag back in a nice state."
+
+When restoring a death bag, the player's current inventory (the scrappy stuff they picked up after dying) should be packaged into a bag item in their inventory -- not just displaced/dropped. This makes the flow:
+
+1. Die -- death bag spawns with your gear
+2. Respawn with copper tools, pick up some junk on the way back
+3. Right-click death bag -- your gear is restored, the junk goes into a new bag item in your inventory
+4. The junk bag can be right-clicked in inventory to open/dump it (like a boss bag or grab bag), rather than restoring it as a loadout (which would replace your real gear again)
+
+**Key requirements:**
+- Current inventory -> bag item in inventory (or dropped if no space)
+- The junk bag needs a right-click-in-inventory mechanic to open it without triggering a full restore (dump contents on the ground or into inventory normally)
+- This is distinct from the loadout bag restore flow -- junk bags are disposable, not a saved loadout
+
 ### Loadout Bag Station (CONFIRMED — building now)
 
 > "You have a loadout station and you right click on it, it turns your current inventory, minus any death bags or loadout bags, into a loadout bag item in your inventory. You can then drop that in the world somewhere."

@@ -58,6 +58,26 @@ Vanilla has 200 NPC slots max. Co-op with 2 players won't produce more than ~10 
 6. Bag visuals and hover text
 7. Bag physics (push apart)
 
+## Sprite & Icon Processing (BLOCKS PUBLISHING)
+
+Raw AI-generated PNGs have been added to the repo root:
+- `deathbag-raw.png` -- death bag sprite
+- `loadoutbag-raw.png` -- loadout bag sprite  
+- `modicon-raw.png` -- mod icon (required for publishing to mod browser)
+
+**Processing needed for all three:**
+- Crop transparent border (auto-crop to content bounds)
+- Scale down to appropriate Terraria sprite size (bag sprites should match existing `DeathBagNPC.png` dimensions; mod icon should be 80x80)
+- Review pixel alignment -- AI-generated art may have anti-aliasing or sub-pixel artifacts that look wrong at Terraria's pixel scale. May need manual cleanup or quantization.
+- Save processed versions to their final paths (do NOT overwrite the raw files)
+
+**Mod icon specific:**
+- Fill any transparent holes within the opaque square region (the content area should be fully opaque, only the outside should be transparent)
+
+**Output paths:**
+- Bag sprites -> `Common/NPCs/DeathBagNPC.png` (death bag) and a loadout bag equivalent
+- Mod icon -> `icon.png` (root of mod, tModLoader convention)
+
 ## Test Scenarios
 
 No automated test framework — tModLoader mods are tested manually in-game.
