@@ -58,25 +58,25 @@ Vanilla has 200 NPC slots max. Co-op with 2 players won't produce more than ~10 
 6. Bag visuals and hover text
 7. Bag physics (push apart)
 
-## Sprite & Icon Processing (BLOCKS PUBLISHING)
+## Sprite & Icon Processing — DONE
 
-Raw AI-generated PNGs have been added to the repo root:
-- `deathbag-raw.png` -- death bag sprite
-- `loadoutbag-raw.png` -- loadout bag sprite  
-- `modicon-raw.png` -- mod icon (required for publishing to mod browser)
+Processed by `create_sprites.py` (run from DeathBag directory, requires PIL):
 
-**Processing needed for all three:**
-- Crop transparent border (auto-crop to content bounds)
-- Scale down to appropriate Terraria sprite size (bag sprites should match existing `DeathBagNPC.png` dimensions; mod icon should be 80x80)
-- Review pixel alignment -- AI-generated art may have anti-aliasing or sub-pixel artifacts that look wrong at Terraria's pixel scale. May need manual cleanup or quantization.
-- Save processed versions to their final paths (do NOT overwrite the raw files)
+| Raw source | Output | Size |
+|---|---|---|
+| `deathbag-raw.png` | `Common/NPCs/DeathBagNPC.png` | 48x48 (content ~31x40) |
+| `deathbag-raw.png` | `Common/Items/DeathBagItem.png` | 24x24 |
+| `loadoutbag-raw.png` | `Common/NPCs/LoadoutBagNPC.png` | 48x48 (content ~31x32) |
+| `loadoutbag-raw.png` | `Common/Items/LoadoutBagItem.png` | 24x24 |
+| `modicon-raw.png` | `icon.png` | 80x80 |
 
-**Mod icon specific:**
-- Fill any transparent holes within the opaque square region (the content area should be fully opaque, only the outside should be transparent)
+Processing: auto-crop, LANCZOS downscale, color quantization (32 colors), alpha threshold. Mod icon gets transparent hole filling.
 
-**Output paths:**
-- Bag sprites -> `Common/NPCs/DeathBagNPC.png` (death bag) and a loadout bag equivalent
-- Mod icon -> `icon.png` (root of mod, tModLoader convention)
+Loadout bags now use their own NPC texture (loaded in `SetStaticDefaults`) instead of the blue-green tint.
+
+**TODO:** `LoadoutBagItem.png` exists but isn't used yet — `DeathBagItem` is a single item type for both kinds. Would need `PreDrawInInventory` override to swap texture based on `Kind`.
+
+**TODO:** Sprites may need visual review in-game. The AI art doesn't have a clean pixel grid, so the downscaled result may look slightly soft compared to hand-drawn pixel art.
 
 ## Test Scenarios
 
