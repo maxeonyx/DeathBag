@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using ReLogic.Content;
 using Terraria;
 using Terraria.ID;
 using Terraria.ModLoader;
@@ -54,6 +55,9 @@ public sealed class DeathBagNPC : ModNPC
     /// </summary>
     public string DeliveredBy = "";
 
+    /// <summary>Separate texture for loadout bags (loaded in SetStaticDefaults).</summary>
+    private static Asset<Texture2D> _loadoutTexture;
+
     /// <summary>Visual-only bob offset (pixels). Applied in draw, not to NPC.position.</summary>
     private float _bobOffset;
 
@@ -68,6 +72,8 @@ public sealed class DeathBagNPC : ModNPC
     public override void SetStaticDefaults()
     {
         Main.npcFrameCount[Type] = 1;
+
+        _loadoutTexture = ModContent.Request<Texture2D>("DeathBag/Common/NPCs/LoadoutBagNPC", AssetRequestMode.ImmediateLoad);
 
         NPCID.Sets.NPCBestiaryDrawModifiers drawModifiers = new()
         {
@@ -276,13 +282,10 @@ public sealed class DeathBagNPC : ModNPC
 
     public override bool PreDraw(SpriteBatch spriteBatch, Vector2 screenPos, Color drawColor)
     {
-        if (Kind == BagKind.Loadout)
-        {
-            // Tint loadout bags blue-green to distinguish from death bags
-            drawColor = new Color(140, 180, 255) * (drawColor.A / 255f);
-        }
+        var texture = Kind == BagKind.Loadout && _loadoutTexture?.Value != null
+            ? _loadoutTexture.Value
+            : Terraria.GameContent.TextureAssets.Npc[NPC.type].Value;
 
-        var texture = Terraria.GameContent.TextureAssets.Npc[NPC.type].Value;
         Vector2 drawPos = NPC.position - screenPos + new Vector2(NPC.width / 2f, NPC.height / 2f + DrawOffsetY);
         var origin = new Vector2(texture.Width / 2f, texture.Height / 2f);
         spriteBatch.Draw(texture, drawPos, null, drawColor, 0f, origin, 1f, SpriteEffects.None, 0f);

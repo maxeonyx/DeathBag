@@ -1,9 +1,17 @@
 Mods: {
 	DeathBag: {
 		Items: {
+			DeathBagItem: {
+				DisplayName: Death Bag
+				Tooltip: Contains a player's inventory snapshot
+			}
 			LoadoutStationItem: {
 				DisplayName: Loadout Station
+				Tooltip: Right-click to snapshot your inventory into a loadout bag
 			}
+		}
+		NPCs: {
+			DeathBagNPC.DisplayName: Death Bag
 		}
 	}
 }
