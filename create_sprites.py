@@ -269,7 +269,7 @@ if __name__ == "__main__":
         "loadoutbag-raw.png",
         "Common/NPCs/LoadoutBagNPC.png",
         "Common/Items/LoadoutBagItem.png",
-        max_colors=10,
+        max_colors=15,
     )
 
     print("\nProcessing loadout station...")
