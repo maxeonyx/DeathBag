@@ -152,7 +152,7 @@ def quantize_colors(img, max_colors=32):
 
     # Quantize RGB
     rgb = Image.merge("RGB", (r, g, b))
-    rgb_q = rgb.quantize(colors=max_colors, method=Image.MEDIANCUT, dither=Image.NONE)
+    rgb_q = rgb.quantize(colors=max_colors, method=Image.MAXCOVERAGE, dither=Image.NONE)
     rgb_back = rgb_q.convert("RGB")
 
     # Recombine with original alpha (thresholded to fully opaque/transparent)
@@ -161,7 +161,7 @@ def quantize_colors(img, max_colors=32):
 
 
 def process_bag_sprite(raw_path, npc_path, item_path,
-                       canvas_size=48, item_size=32, max_colors=15):
+                       canvas_size=48, max_colors=32):
     """Process a raw bag image into NPC and item sprites.
 
     Works at half resolution then doubles pixels (nearest-neighbor 2x)
@@ -180,17 +180,16 @@ def process_bag_sprite(raw_path, npc_path, item_path,
     npc_sprite.save(npc_path)
     print(f"  NPC sprite: {half_canvas}x{half_canvas} -> 2x -> {npc_sprite.size} -> {npc_path}")
 
-    # Item sprite: process at half size, then double
-    half_item = item_size // 2
-    item_scaled = scale_to_fill(squared, half_item, padding=1)
+    # Item sprite: same as NPC
+    item_scaled = scale_to_fill(squared, half_canvas, padding=1)
     item_quantized = quantize_colors(item_scaled, max_colors=max_colors)
     item_sprite = double_pixels(item_quantized)
     item_sprite.save(item_path)
-    print(f"  Item sprite: {half_item}x{half_item} -> 2x -> {item_sprite.size} -> {item_path}")
+    print(f"  Item sprite: {half_canvas}x{half_canvas} -> 2x -> {item_sprite.size} -> {item_path}")
 
 
 def process_tile_sprite(raw_path, tile_path, item_path,
-                        tile_width=3, tile_height=3, item_size=32, max_colors=15):
+                        tile_width=3, tile_height=3, item_size=48, max_colors=32):
     """Process a raw tile image into a tile sprite sheet and item sprite.
 
     Tile sprite sheets use 16px tiles with 2px padding between them.
@@ -261,7 +260,6 @@ if __name__ == "__main__":
         "deathbag-raw.png",
         "Common/NPCs/DeathBagNPC.png",
         "Common/Items/DeathBagItem.png",
-        max_colors=15,
     )
 
     print("\nProcessing loadout bag...")
@@ -269,7 +267,6 @@ if __name__ == "__main__":
         "loadoutbag-raw.png",
         "Common/NPCs/LoadoutBagNPC.png",
         "Common/Items/LoadoutBagItem.png",
-        max_colors=15,
     )
 
     print("\nProcessing loadout station...")
@@ -277,7 +274,6 @@ if __name__ == "__main__":
         "loadoutstation-raw.png",
         "Common/Tiles/LoadoutStationTile.png",
         "Common/Items/LoadoutStationItem.png",
-        max_colors=25,
     )
 
     print("\nProcessing mod icon...")

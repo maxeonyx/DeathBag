@@ -45,8 +45,8 @@ public sealed class DeathBagItem : ModItem
 
     public override void SetDefaults()
     {
-        Item.width = 32;
-        Item.height = 32;
+        Item.width = 48;
+        Item.height = 48;
         Item.maxStack = 1;
         Item.rare = ItemRarityID.Orange;
         Item.value = 0;
