@@ -131,6 +131,16 @@ def fill_transparent_holes(img):
     return img
 
 
+def double_pixels(img):
+    """Scale image 2x with nearest-neighbor to match Terraria's 2x2 pixel aesthetic.
+
+    Process at half resolution first, then call this to double up.
+    Every 'game pixel' becomes a 2x2 block of screen pixels.
+    """
+    w, h = img.size
+    return img.resize((w * 2, h * 2), Image.NEAREST)
+
+
 def quantize_colors(img, max_colors=32):
     """Reduce color count for cleaner pixel-art look.
     Preserves alpha channel."""
@@ -152,23 +162,31 @@ def quantize_colors(img, max_colors=32):
 
 def process_bag_sprite(raw_path, npc_path, item_path,
                        canvas_size=48, item_size=32, max_colors=15):
-    """Process a raw bag image into NPC and item sprites."""
+    """Process a raw bag image into NPC and item sprites.
+
+    Works at half resolution then doubles pixels (nearest-neighbor 2x)
+    to match Terraria's 2x2 game-pixel aesthetic.
+    """
     raw = Image.open(raw_path).convert("RGBA")
     cropped = autocrop(raw)
     squared = pad_to_square(cropped)
     print(f"  Cropped: {cropped.size}, squared: {squared.size}")
 
-    # NPC sprite: fill canvas with 1px padding
-    npc_scaled = scale_to_fill(squared, canvas_size, padding=1)
-    npc_sprite = quantize_colors(npc_scaled, max_colors=max_colors)
+    # NPC sprite: process at half size, then double
+    half_canvas = canvas_size // 2
+    npc_scaled = scale_to_fill(squared, half_canvas, padding=1)
+    npc_quantized = quantize_colors(npc_scaled, max_colors=max_colors)
+    npc_sprite = double_pixels(npc_quantized)
     npc_sprite.save(npc_path)
-    print(f"  NPC sprite: {npc_sprite.size} -> {npc_path}")
+    print(f"  NPC sprite: {half_canvas}x{half_canvas} -> 2x -> {npc_sprite.size} -> {npc_path}")
 
-    # Item sprite: same size as NPC, fill canvas with 1px padding
-    item_scaled = scale_to_fill(squared, item_size, padding=1)
-    item_sprite = quantize_colors(item_scaled, max_colors=max_colors)
+    # Item sprite: process at half size, then double
+    half_item = item_size // 2
+    item_scaled = scale_to_fill(squared, half_item, padding=1)
+    item_quantized = quantize_colors(item_scaled, max_colors=max_colors)
+    item_sprite = double_pixels(item_quantized)
     item_sprite.save(item_path)
-    print(f"  Item sprite: {item_sprite.size} -> {item_path}")
+    print(f"  Item sprite: {half_item}x{half_item} -> 2x -> {item_sprite.size} -> {item_path}")
 
 
 def process_tile_sprite(raw_path, tile_path, item_path,
@@ -176,50 +194,48 @@ def process_tile_sprite(raw_path, tile_path, item_path,
     """Process a raw tile image into a tile sprite sheet and item sprite.
 
     Tile sprite sheets use 16px tiles with 2px padding between them.
-    The last row is 18px tall (extends into ground), others are 16px.
+    Works at half resolution then doubles pixels to match Terraria's
+    2x2 game-pixel aesthetic. Each tile cell is 8x8 game-pixels (16x16 real).
     """
     raw = Image.open(raw_path).convert("RGBA")
     cropped = autocrop(raw)
-    squared = pad_to_square(cropped)
-    print(f"  Cropped: {cropped.size}, squared: {squared.size}")
+    print(f"  Cropped: {cropped.size}")
 
-    # Tile sheet dimensions: each column is 16+2=18px, each row is 16+2=18px
-    # (last row height is 18 in CoordinateHeights but same padding in sprite)
-    sheet_w = tile_width * 16 + (tile_width - 1) * 2
-    sheet_h = tile_height * 16 + (tile_height - 1) * 2
-    print(f"  Tile sheet: {sheet_w}x{sheet_h}")
+    # Work at half resolution: each tile is 8px, gaps are 1px
+    half_tile = 8
+    half_gap = 1
+    half_content_w = tile_width * half_tile
+    half_content_h = tile_height * half_tile
 
-    # Scale content to fit the actual tile area (excluding padding)
-    content_w = tile_width * 16
-    content_h = tile_height * 16
-    content_scaled = scale_to_fill(squared, content_w, padding=0)
-    # Crop to exact content size (scale_to_fill centers on a square canvas)
-    cx = (content_scaled.width - content_w) // 2
-    cy = (content_scaled.height - content_h) // 2
-    content_cropped = content_scaled.crop((cx, cy, cx + content_w, cy + content_h))
-    content_clean = quantize_colors(content_cropped, max_colors=max_colors)
+    # Stretch content to fill tile area exactly (no padding, no square)
+    content_half = cropped.resize((half_content_w, half_content_h), Image.LANCZOS)
+    content_clean = quantize_colors(content_half, max_colors=max_colors)
 
-    # Build tile sheet by inserting 2px transparent gaps
-    sheet = Image.new("RGBA", (sheet_w, sheet_h), (0, 0, 0, 0))
+    # Build half-res tile sheet with 1px gaps
+    half_sheet_w = tile_width * half_tile + (tile_width - 1) * half_gap
+    half_sheet_h = tile_height * half_tile + (tile_height - 1) * half_gap
+    half_sheet = Image.new("RGBA", (half_sheet_w, half_sheet_h), (0, 0, 0, 0))
     for ty in range(tile_height):
         for tx in range(tile_width):
-            # Source region from content
-            src_x = tx * 16
-            src_y = ty * 16
-            tile_piece = content_clean.crop((src_x, src_y, src_x + 16, src_y + 16))
-            # Destination in sheet (with 2px gaps)
-            dst_x = tx * 18
-            dst_y = ty * 18
-            sheet.paste(tile_piece, (dst_x, dst_y))
+            src_x = tx * half_tile
+            src_y = ty * half_tile
+            tile_piece = content_clean.crop((src_x, src_y, src_x + half_tile, src_y + half_tile))
+            dst_x = tx * (half_tile + half_gap)
+            dst_y = ty * (half_tile + half_gap)
+            half_sheet.paste(tile_piece, (dst_x, dst_y))
 
+    # Double pixels to final size
+    sheet = double_pixels(half_sheet)
     sheet.save(tile_path)
-    print(f"  Tile sprite: {sheet.size} -> {tile_path}")
+    print(f"  Tile sprite: {half_sheet_w}x{half_sheet_h} -> 2x -> {sheet.size} -> {tile_path}")
 
-    # Item sprite
-    item_scaled = scale_to_fill(squared, item_size, padding=1)
-    item_sprite = quantize_colors(item_scaled, max_colors=max_colors)
+    # Item sprite: half res then double
+    half_item = item_size // 2
+    item_scaled = scale_to_fill(pad_to_square(cropped), half_item, padding=1)
+    item_quantized = quantize_colors(item_scaled, max_colors=max_colors)
+    item_sprite = double_pixels(item_quantized)
     item_sprite.save(item_path)
-    print(f"  Item sprite: {item_sprite.size} -> {item_path}")
+    print(f"  Item sprite: {half_item}x{half_item} -> 2x -> {item_sprite.size} -> {item_path}")
 
 
 def process_mod_icon(raw_path, icon_path, target_size=480):
