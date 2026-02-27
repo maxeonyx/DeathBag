@@ -372,10 +372,19 @@ public sealed class DeathBagNPC : ModNPC
             Vector2 diff = NPC.Center - other.Center;
             float distBetween = diff.Length();
 
-            if (distBetween < pushRadius && distBetween > 0.01f)
+            if (distBetween < pushRadius)
             {
+                if (distBetween < 0.01f)
+                {
+                    // Exactly overlapping — nudge with a deterministic offset based on whoAmI
+                    // so each bag gets pushed a different direction
+                    float angle = NPC.whoAmI * 2.3f;
+                    diff = new Vector2((float)Math.Cos(angle), (float)Math.Sin(angle));
+                    distBetween = 0.01f;
+                }
+
                 Vector2 push = Vector2.Normalize(diff) * pushStrength * (1f - distBetween / pushRadius);
-                NPC.velocity.X += push.X;
+                NPC.velocity += push;
             }
         }
     }
