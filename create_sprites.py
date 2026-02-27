@@ -277,6 +277,7 @@ if __name__ == "__main__":
         "loadoutstation-raw.png",
         "Common/Tiles/LoadoutStationTile.png",
         "Common/Items/LoadoutStationItem.png",
+        max_colors=25,
     )
 
     print("\nProcessing mod icon...")
