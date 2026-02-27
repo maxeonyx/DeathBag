@@ -28,9 +28,9 @@ public sealed class LoadoutStationTile : ModTile
 
         AddMapEntry(new Color(120, 140, 200), Language.GetText("Loadout Station"));
 
-        // 2x2 furniture
-        TileObjectData.newTile.CopyFrom(TileObjectData.Style2x2);
-        TileObjectData.newTile.CoordinateHeights = new[] { 16, 18 };
+        // 3x3 furniture
+        TileObjectData.newTile.CopyFrom(TileObjectData.Style3x3);
+        TileObjectData.newTile.CoordinateHeights = new[] { 16, 16, 18 };
         TileObjectData.addTile(Type);
     }
 

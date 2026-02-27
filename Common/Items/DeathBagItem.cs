@@ -1,6 +1,8 @@
 using System.Collections.Generic;
 using System.IO;
 using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
+using ReLogic.Content;
 using Terraria;
 using Terraria.Chat;
 using Terraria.ID;
@@ -33,16 +35,47 @@ public sealed class DeathBagItem : ModItem
     /// <summary>Saved inventory snapshot carried by this bag.</summary>
     public List<(int SlotIndex, Item Item)> SavedInventory = new();
 
+    /// <summary>Separate texture for loadout bag items.</summary>
+    private static Asset<Texture2D> _loadoutTexture;
+
+    public override void SetStaticDefaults()
+    {
+        _loadoutTexture = ModContent.Request<Texture2D>("DeathBag/Common/Items/LoadoutBagItem", AssetRequestMode.ImmediateLoad);
+    }
+
     public override void SetDefaults()
     {
-        Item.width = 24;
-        Item.height = 24;
+        Item.width = 32;
+        Item.height = 32;
         Item.maxStack = 1;
         Item.rare = ItemRarityID.Orange;
         Item.value = 0;
         // Not usable, not placeable, not consumable
         Item.useStyle = ItemUseStyleID.None;
         Item.noUseGraphic = true;
+    }
+
+    public override bool PreDrawInInventory(SpriteBatch spriteBatch, Vector2 position, Rectangle frame,
+        Color drawColor, Color itemColor, Vector2 origin, float scale)
+    {
+        if (Kind != BagKind.Loadout || _loadoutTexture?.Value == null)
+            return true; // use default texture
+
+        spriteBatch.Draw(_loadoutTexture.Value, position, frame, drawColor, 0f, origin, scale, SpriteEffects.None, 0f);
+        return false;
+    }
+
+    public override bool PreDrawInWorld(SpriteBatch spriteBatch, Color lightColor, Color alphaColor,
+        ref float rotation, ref float scale, int whoAmI)
+    {
+        if (Kind != BagKind.Loadout || _loadoutTexture?.Value == null)
+            return true;
+
+        var texture = _loadoutTexture.Value;
+        Vector2 drawPos = Item.position - Main.screenPosition + new Vector2(Item.width / 2f, Item.height / 2f);
+        var drawOrigin = new Vector2(texture.Width / 2f, texture.Height / 2f);
+        spriteBatch.Draw(texture, drawPos, null, lightColor, rotation, drawOrigin, scale, SpriteEffects.None, 0f);
+        return false;
     }
 
     public override void ModifyTooltips(List<TooltipLine> tooltips)

@@ -14,8 +14,8 @@ public sealed class LoadoutStationItem : ModItem
     public override void SetDefaults()
     {
         Item.DefaultToPlaceableTile(ModContent.TileType<LoadoutStationTile>());
-        Item.width = 28;
-        Item.height = 20;
+        Item.width = 32;
+        Item.height = 32;
         Item.value = Item.buyPrice(gold: 5);
         Item.rare = ItemRarityID.Green;
     }

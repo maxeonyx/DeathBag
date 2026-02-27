@@ -64,19 +64,17 @@ Processed by `create_sprites.py` (run from DeathBag directory, requires PIL):
 
 | Raw source | Output | Size |
 |---|---|---|
-| `deathbag-raw.png` | `Common/NPCs/DeathBagNPC.png` | 48x48 (content ~31x40) |
+| `deathbag-raw.png` | `Common/NPCs/DeathBagNPC.png` | 48x48 |
 | `deathbag-raw.png` | `Common/Items/DeathBagItem.png` | 24x24 |
-| `loadoutbag-raw.png` | `Common/NPCs/LoadoutBagNPC.png` | 48x48 (content ~31x32) |
+| `loadoutbag-raw.png` | `Common/NPCs/LoadoutBagNPC.png` | 48x48 |
 | `loadoutbag-raw.png` | `Common/Items/LoadoutBagItem.png` | 24x24 |
-| `modicon-raw.png` | `icon.png` | 80x80 |
+| `modicon-raw.png` | `icon.png` | 480x480 |
 
-Processing: auto-crop, LANCZOS downscale, color quantization (32 colors), alpha threshold. Mod icon gets transparent hole filling.
+Processing pipeline: auto-crop to content bounds, pad to square (center content), scale to fill target with 1px padding, color quantize (32 colors), alpha threshold. Mod icon also gets transparent hole filling via flood-fill.
 
-Loadout bags now use their own NPC texture (loaded in `SetStaticDefaults`) instead of the blue-green tint.
+Loadout bags use their own textures — both NPC (`LoadoutBagNPC.png` loaded in `SetStaticDefaults`) and item (`LoadoutBagItem.png` via `PreDrawInInventory`/`PreDrawInWorld`).
 
-**TODO:** `LoadoutBagItem.png` exists but isn't used yet — `DeathBagItem` is a single item type for both kinds. Would need `PreDrawInInventory` override to swap texture based on `Kind`.
-
-**TODO:** Sprites may need visual review in-game. The AI art doesn't have a clean pixel grid, so the downscaled result may look slightly soft compared to hand-drawn pixel art.
+**TODO:** Sprites need in-game visual review. The AI art has no clean pixel grid, so downscaled results may look slightly soft compared to hand-drawn pixel art.
 
 ## Test Scenarios
 
