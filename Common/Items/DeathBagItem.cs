@@ -112,7 +112,7 @@ public sealed class DeathBagItem : ModItem
     {
         // Dump bag contents into inventory using normal pickup logic
         // (stacking onto existing, then empty slots, overflow drops on ground)
-        Mod.Logger.Info($"[DeathBag] Opening bag item: {SavedInventory.Count} items for {player.name}");
+        DB.LogBagContents(Mod, "owner opened bag item", OwnerName, Kind, SavedInventory);
 
         foreach (var (_, savedItem) in SavedInventory)
         {
@@ -139,6 +139,9 @@ public sealed class DeathBagItem : ModItem
             return;
 
         SpawnBagNPCFromItem();
+
+        // Log before removing item entity (data is now in the NPC)
+        DB.LogBagContents(Mod, "item->NPC conversion", OwnerName, Kind, SavedInventory);
 
         // Remove the world item entity — active = false is how vanilla removes ground items.
         // TurnToAir() only zeroes type/stack (designed for inventory slots, not world entities).

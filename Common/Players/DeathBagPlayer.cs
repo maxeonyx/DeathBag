@@ -212,6 +212,9 @@ public sealed class DeathBagPlayer : ModPlayer
         // Defer NPC removal to next tick (removing mid-frame can crash)
         _pendingBagRemoval = bag.NPC.whoAmI;
 
+        // Log contents before clearing (disaster recovery)
+        DB.LogBagContents(Mod, "owner restore", bag.OwnerName, bag.Kind, bag.SavedInventory);
+
         // Mark bag as consumed immediately so AI() can't trigger a second restore
         bag.SavedInventory.Clear();
 

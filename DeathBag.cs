@@ -95,8 +95,9 @@ public sealed class DeathBag : Mod
             return;
 
         if (npcIndex >= 0 && npcIndex < Main.maxNPCs && Main.npc[npcIndex].active
-            && Main.npc[npcIndex].ModNPC is DeathBagNPC)
+            && Main.npc[npcIndex].ModNPC is DeathBagNPC bagNPC)
         {
+            LogBagContents(this, "BagRemoved", bagNPC.OwnerName, bagNPC.Kind, bagNPC.SavedInventory);
             Logger.Info($"[DeathBag] Server: removing bag NPC (index {npcIndex})");
             Main.npc[npcIndex].active = false;
             Main.npc[npcIndex].netUpdate = true;
@@ -241,6 +242,30 @@ public sealed class DeathBag : Mod
     }
 
     // === Shared inventory serialization (used by packets and SendExtraAI) ===
+
+    /// <summary>
+    /// Logs bag contents before destruction for disaster recovery.
+    /// Compact format: one summary line + up to 20 items. If more, shows count of omitted.
+    /// </summary>
+    internal static void LogBagContents(Mod mod, string reason, string ownerName, BagKind kind,
+        List<(int SlotIndex, Item Item)> inventory)
+    {
+        string kindName = kind == BagKind.Loadout ? "Loadout" : "Death Bag";
+        mod.Logger.Info($"[DeathBag] BAG CONSUMED ({reason}): {ownerName}'s {kindName}, {inventory.Count} items:");
+
+        int logged = 0;
+        const int maxLog = 20;
+        foreach (var (slot, item) in inventory)
+        {
+            if (logged >= maxLog)
+            {
+                mod.Logger.Info($"[DeathBag]   ... and {inventory.Count - maxLog} more items");
+                break;
+            }
+            mod.Logger.Info($"[DeathBag]   slot {slot}: {item.Name} x{item.stack} (id={item.type}, prefix={item.prefix})");
+            logged++;
+        }
+    }
 
     internal static void WriteInventory(BinaryWriter writer, List<(int SlotIndex, Item Item)> inventory)
     {

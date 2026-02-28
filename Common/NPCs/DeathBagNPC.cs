@@ -244,6 +244,7 @@ public sealed class DeathBagNPC : ModNPC
             item.SetNameOverride($"{OwnerName}'s {kindName}");
             localPlayer.inventory[emptySlot] = item;
 
+            DB.LogBagContents(Mod, "non-owner pickup (SP)", OwnerName, Kind, SavedInventory);
             NPC.active = false;
 
             Mod.Logger.Info($"[DeathBag] {localPlayer.name} picked up {OwnerName}'s {kindName} ({SavedInventory.Count} items)");
