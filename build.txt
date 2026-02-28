@@ -1,5 +1,5 @@
 displayName = Death Bag
 author = maxeonyx
-version = 0.1.56
+version = 0.1.57
 homepage = https://github.com/maxeonyx/DeathBag
 buildIgnore = *-raw.png, create_sprites.py, PLAN.md, VISION.md, AGENTS.md, TASK*.md, *.ignore.md, .gitignore
