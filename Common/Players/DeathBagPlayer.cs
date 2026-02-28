@@ -106,6 +106,10 @@ public sealed class DeathBagPlayer : ModPlayer
             {
                 Mod.Logger.Info($"[DeathBag] Removing bag NPC (index {npcIndex}) on deferred tick");
 
+                // Log if NPC still has inventory data (it shouldn't — RestoreFromBag clears it)
+                if (Main.npc[npcIndex].ModNPC is DeathBagNPC bagNPC && bagNPC.SavedInventory.Count > 0)
+                    Mod.Logger.Warn($"[DeathBag] WARNING: bag NPC {npcIndex} still has {bagNPC.SavedInventory.Count} items at removal time!");
+
                 if (Main.netMode == NetmodeID.MultiplayerClient)
                 {
                     // Tell server to remove the NPC
@@ -440,7 +444,8 @@ public sealed class DeathBagPlayer : ModPlayer
 
         if (npcIndex < 0 || npcIndex >= Main.maxNPCs)
         {
-            Mod.Logger.Error($"[DeathBag] Failed to spawn bag NPC: NewNPC returned {npcIndex}");
+            Mod.Logger.Error($"[DeathBag] CRITICAL: Failed to spawn bag NPC (NewNPC={npcIndex}), {inventory.Count} items LOST for {ownerName}!");
+            DB.LogBagContents(Mod, "FAILED SpawnBagNPC (NPC slot full)", ownerName, kind, inventory);
             return;
         }
 
@@ -455,6 +460,7 @@ public sealed class DeathBagPlayer : ModPlayer
             npc.netUpdate = true;
             bagNPC.ResolveOwnerIndex();
             Mod.Logger.Info($"[DeathBag] Bag NPC spawned (index {npcIndex}) for {ownerName} with {inventory.Count} items, kind={kind}, loadout {deathLoadoutIndex}");
+            DB.LogBagContents(Mod, "SpawnBagNPC (SP/host)", ownerName, kind, inventory);
         }
         else
         {

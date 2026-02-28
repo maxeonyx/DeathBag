@@ -69,7 +69,8 @@ public sealed class DeathBag : Mod
 
         if (npcIndex < 0 || npcIndex >= Main.maxNPCs)
         {
-            Logger.Error($"[DeathBag] Server: Failed to spawn bag NPC, NewNPC returned {npcIndex}");
+            Logger.Error($"[DeathBag] CRITICAL: Server failed to spawn bag NPC (NewNPC={npcIndex}), {inventory.Count} items LOST for {ownerName}!");
+            LogBagContents(this, "FAILED BagCreated (NPC slot full)", ownerName, kind, inventory);
             return;
         }
 
@@ -84,6 +85,8 @@ public sealed class DeathBag : Mod
 
             // netAlways + netUpdate ensures vanilla syncs this NPC (with SendExtraAI data) to all clients
             npc.netUpdate = true;
+
+            LogBagContents(this, "BagCreated (server)", ownerName, kind, inventory);
         }
     }
 
@@ -191,6 +194,8 @@ public sealed class DeathBag : Mod
 
         // Item placed successfully — NOW tell the server to remove the bag NPC
         SendBagRemoved(this, npcIndex);
+
+        LogBagContents(this, "non-owner pickup (MP client)", ownerName, kind, inventory);
 
         // Sync the new item slot to server
         NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, localPlayer.whoAmI, emptySlot);

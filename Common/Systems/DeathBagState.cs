@@ -114,19 +114,27 @@ public sealed class DeathBagState : ModSystem
         if (Main.netMode == NetmodeID.MultiplayerClient)
             return;
 
-        foreach (var data in _pendingBags)
+        // Spawn bags, keeping failed ones for retry next tick
+        for (int i = _pendingBags.Count - 1; i >= 0; i--)
         {
+            var data = _pendingBags[i];
             int npcIndex = NPC.NewNPC(
                 Terraria.Entity.GetSource_NaturalSpawn(),
                 (int)data.X, (int)data.Y,
                 ModContent.NPCType<DeathBagNPC>());
 
             if (npcIndex < 0 || npcIndex >= Main.maxNPCs)
-                continue;
+            {
+                Mod.Logger.Warn($"[DeathBag] PostUpdateWorld: failed to spawn bag for {data.OwnerName} (NewNPC={npcIndex}), will retry next tick");
+                continue; // Keep in pending list — retry next tick
+            }
 
             NPC npc = Main.npc[npcIndex];
             if (npc.ModNPC is not DeathBagNPC bagNPC)
+            {
+                Mod.Logger.Error($"[DeathBag] PostUpdateWorld: spawned NPC is not DeathBagNPC, will retry next tick");
                 continue;
+            }
 
             bagNPC.Kind = data.Kind;
             bagNPC.OwnerName = data.OwnerName;
@@ -134,9 +142,9 @@ public sealed class DeathBagState : ModSystem
             bagNPC.SavedInventory = data.Inventory;
             bagNPC.DeathLoadoutIndex = data.DeathLoadoutIndex;
             npc.netUpdate = true;
-        }
 
-        _pendingBags.Clear();
+            _pendingBags.RemoveAt(i); // Successfully spawned — remove from pending
+        }
     }
 
     /// <summary>

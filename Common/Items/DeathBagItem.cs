@@ -138,7 +138,8 @@ public sealed class DeathBagItem : ModItem
         if (SavedInventory.Count == 0)
             return;
 
-        SpawnBagNPCFromItem();
+        if (!SpawnBagNPCFromItem())
+            return; // NPC spawn failed — keep item alive to preserve inventory data
 
         // Log before removing item entity (data is now in the NPC)
         DB.LogBagContents(Mod, "item->NPC conversion", OwnerName, Kind, SavedInventory);
@@ -150,7 +151,12 @@ public sealed class DeathBagItem : ModItem
             NetMessage.SendData(MessageID.SyncItem, -1, -1, null, Item.whoAmI);
     }
 
-    private void SpawnBagNPCFromItem()
+    /// <summary>
+    /// Converts this bag item into a bag NPC at the item's position.
+    /// Returns true if NPC was spawned successfully, false if it failed (NPC slots full).
+    /// On failure, the caller should NOT destroy the item — data would be lost.
+    /// </summary>
+    private bool SpawnBagNPCFromItem()
     {
         int npcIndex = NPC.NewNPC(
             Terraria.Entity.GetSource_NaturalSpawn(),
@@ -160,8 +166,8 @@ public sealed class DeathBagItem : ModItem
 
         if (npcIndex < 0 || npcIndex >= Main.maxNPCs)
         {
-            Mod.Logger.Error("[DeathBag] Failed to spawn bag NPC from item");
-            return;
+            Mod.Logger.Error($"[DeathBag] CRITICAL: Failed to spawn bag NPC from item (NewNPC={npcIndex}), keeping item alive to preserve data");
+            return false;
         }
 
         NPC npc = Main.npc[npcIndex];
@@ -188,7 +194,12 @@ public sealed class DeathBagItem : ModItem
             {
                 Main.NewText($"{CarrierName} dropped {OwnerName}'s {deliveryKind} nearby.", Color.LightGreen);
             }
+
+            return true;
         }
+
+        Mod.Logger.Error($"[DeathBag] CRITICAL: Spawned NPC is not DeathBagNPC, keeping item alive to preserve data");
+        return false;
     }
 
     public override void SaveData(TagCompound tag)

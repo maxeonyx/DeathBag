@@ -76,6 +76,11 @@ Pipeline: threshold alpha -> autocrop -> scale to half target (LANCZOS) -> quant
 
 Loadout bags use their own textures — both NPC and item.
 
+## Known Bugs
+
+### Non-owner pickup "no room" leaves NPC unclickable
+After right-clicking a non-owner bag NPC and getting "No room in your inventory!", the NPC stays alive (data safe — this is correct) but becomes unclickable. The chat UI state likely gets stuck, preventing a second interaction. The expected flow is: see "no room" → free up a slot → click again to pick up. Need to investigate whether the chat UI needs explicit cleanup on the "no room" path.
+
 ## Next Up
 
 ### Right-click to open own loadout bags in inventory — IN PROGRESS
