@@ -120,12 +120,14 @@ public sealed class DeathBag : Mod
             return;
         }
 
-        NPC npc = Main.npc[npcIndex];
-
         // Send bag data to the requesting client so it can place the item itself
         // (inventory is client-authoritative — server can't modify it)
+        // NOTE: Do NOT remove the NPC here! The client will send BagRemoved
+        // after it confirms the item was placed successfully. This prevents
+        // data loss if the client has no inventory room.
         var response = GetPacket();
         response.Write((byte)MessageType.BagToItemResponse);
+        response.Write(npcIndex); // client needs this to send BagRemoved on success
         response.Write((byte)bagNPC.Kind);
         response.Write(bagNPC.OwnerName);
         response.Write(bagNPC.DeathLoadoutIndex);
@@ -134,16 +136,12 @@ public sealed class DeathBag : Mod
         response.Send(whoAmI); // to requesting client only
 
         string kindName = bagNPC.Kind == BagKind.Loadout ? "Loadout" : "Death Bag";
-        Logger.Info($"[DeathBag] Server: sent BagToItemResponse for {bagNPC.OwnerName}'s {kindName} to {carrierName} (player {whoAmI})");
-
-        // Remove the NPC
-        npc.active = false;
-        npc.netUpdate = true;
-        NetMessage.SendData(MessageID.SyncNPC, -1, -1, null, npcIndex);
+        Logger.Info($"[DeathBag] Server: sent BagToItemResponse for {bagNPC.OwnerName}'s {kindName} to {carrierName} (player {whoAmI}), NPC kept alive pending confirmation");
     }
 
     private void HandleBagToItemResponse(BinaryReader reader)
     {
+        int npcIndex = reader.ReadInt32();
         var kind = (BagKind)reader.ReadByte();
         string ownerName = reader.ReadString();
         int deathLoadoutIndex = reader.ReadInt32();
@@ -168,8 +166,9 @@ public sealed class DeathBag : Mod
 
         if (emptySlot < 0)
         {
-            Logger.Warn($"[DeathBag] Client: no room for {ownerName}'s bag item");
+            Logger.Warn($"[DeathBag] Client: no room for {ownerName}'s bag item — bag NPC preserved on server");
             Main.NewText("No room in your inventory!", Microsoft.Xna.Framework.Color.Yellow);
+            // Do NOT send BagRemoved — the NPC stays alive on the server
             return;
         }
 
@@ -189,7 +188,13 @@ public sealed class DeathBag : Mod
         item.SetNameOverride($"{ownerName}'s {kindName}");
         localPlayer.inventory[emptySlot] = item;
 
-        Logger.Info($"[DeathBag] Client: placed {ownerName}'s {kindName} in inventory slot {emptySlot}");
+        // Item placed successfully — NOW tell the server to remove the bag NPC
+        SendBagRemoved(this, npcIndex);
+
+        // Sync the new item slot to server
+        NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, localPlayer.whoAmI, emptySlot);
+
+        Logger.Info($"[DeathBag] Client: placed {ownerName}'s {kindName} in inventory slot {emptySlot}, sent BagRemoved for NPC {npcIndex}");
         Main.NewText($"Picked up {ownerName}'s {kindName.ToLower()}.", Microsoft.Xna.Framework.Color.Green);
     }
 

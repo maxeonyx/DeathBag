@@ -1,10 +1,12 @@
-Mediumcore quality-of-life: on death, your items go into a persistent bag instead of scattering on the ground. Right-click to restore your inventory to exactly how it was, slot positions and all.
+Mediumcore quality-of-life: on death, your items go into a persistent bag instead of scattering on the ground. Walk up to your death bag to restore your inventory to exactly how it was, slot positions and all.
 
 Features:
-- Death bags preserve your full inventory layout (slot positions, stacks)
-- Right-click your bag to restore — current items are re-absorbed via normal stacking
-- Bags persist in the world even across sessions
-- Other players can see your bag but can't take from it
+- Death bags preserve your full inventory layout (slot positions, stacks, armor, accessories, loadouts)
+- Walk near your death bag — it magnets toward you and auto-restores
+- Bags persist in the world across sessions
+- Teammates can see your bag, pick it up, and deliver it to you
 - Multiple bags supported (die twice, get two bags)
+- Loadout Station: craftable furniture that snapshots your current inventory into a portable loadout bag
+- Loadout bags can be dropped anywhere as a saved gear set — right-click to restore
 
 Designed for co-op Mediumcore play. Pair with Panic at Dawn and Boss Hexes for the full experience.

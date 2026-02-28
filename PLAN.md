@@ -65,16 +65,28 @@ Processed by `create_sprites.py` (run from DeathBag directory, requires PIL):
 | Raw source | Output | Size |
 |---|---|---|
 | `deathbag-raw.png` | `Common/NPCs/DeathBagNPC.png` | 48x48 |
-| `deathbag-raw.png` | `Common/Items/DeathBagItem.png` | 24x24 |
+| `deathbag-raw.png` | `Common/Items/DeathBagItem.png` | 48x48 |
 | `loadoutbag-raw.png` | `Common/NPCs/LoadoutBagNPC.png` | 48x48 |
-| `loadoutbag-raw.png` | `Common/Items/LoadoutBagItem.png` | 24x24 |
+| `loadoutbag-raw.png` | `Common/Items/LoadoutBagItem.png` | 48x48 |
+| `loadoutstation-raw.png` | `Common/Tiles/LoadoutStationTile.png` | 52x52 |
+| `loadoutstation-raw.png` | `Common/Items/LoadoutStationItem.png` | 48x48 |
 | `modicon-raw.png` | `icon.png` | 480x480 |
 
-Processing pipeline: auto-crop to content bounds, pad to square (center content), scale to fill target with 1px padding, color quantize (32 colors), alpha threshold. Mod icon also gets transparent hole filling via flood-fill.
+Pipeline: threshold alpha -> autocrop -> scale to half target (LANCZOS) -> quantize colors (32, MAXCOVERAGE) -> nearest-neighbor 2x upscale -> save. Mod icon also gets transparent hole filling.
 
-Loadout bags use their own textures — both NPC (`LoadoutBagNPC.png` loaded in `SetStaticDefaults`) and item (`LoadoutBagItem.png` via `PreDrawInInventory`/`PreDrawInWorld`).
+Loadout bags use their own textures — both NPC and item.
 
-**TODO:** Sprites need in-game visual review. The AI art has no clean pixel grid, so downscaled results may look slightly soft compared to hand-drawn pixel art.
+## Next Up
+
+### Right-click to open own loadout bags in inventory — IN PROGRESS
+Owner should be able to right-click a loadout bag item in their inventory to dump its contents into their inventory (like a grab bag). This is NOT a full restore — it just dumps items normally.
+
+**Status:** `CanRightClick` and `RightClick` overrides added to `DeathBagItem.cs`. Not yet tested. Uses `QuickSpawnItem` to dump contents.
+
+### Death bag restore packages current inventory into a bag — NOT STARTED
+When restoring a death bag, the player's current inventory (junk picked up after dying) should be packaged into a new loadout bag item in their inventory, not displaced/dropped. See VISION.md "Death Bag Restore Swaps Current Inventory Into a Bag".
+
+**Planned approach:** Before restore, snapshot current inventory (excluding bags/copper tools) into a DeathBagItem. Clear those slots in `current` dict. After restore, find empty slot in result for the bag item. ComputeRestore logic stays unchanged.
 
 ## Test Scenarios
 

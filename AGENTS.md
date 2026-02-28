@@ -71,3 +71,19 @@ Rules:
 - **Never remove or rename a `TagCompound` key** without migration code that reads the old key
 - **New fields must have sensible defaults** when loaded from old saves that lack them (already done for `DeathLoadoutIndex` and `CarrierName`)
 - **Binary packet format changes** (`SendExtraAI`/`ReceiveExtraAI`, `WriteInventory`/`ReadInventory`) require version coordination — both server and all clients must be on the same mod version. Document breaking packet changes in commit messages.
+
+## Bag Data Safety (CRITICAL)
+
+**Bags contain irreplaceable player inventory. Data loss is the worst possible bug.**
+
+Every code path that touches bag state must be reviewed against these rules:
+
+1. **Never destroy a bag before its contents are confirmed safe.** Setting `NPC.active = false` or clearing `SavedInventory` is irreversible. The contents must already be in the player's inventory, in a new bag item, or in the world save before the original is removed.
+
+2. **Check preconditions before side effects.** If an operation can fail (e.g. "no room in inventory"), validate that condition *first*, before modifying any state. Never: check space -> destroy bag -> create item. Always: check space -> create item -> destroy bag.
+
+3. **Audit every code path that sets `NPC.active = false`, calls `SavedInventory.Clear()`, or removes a bag from world state.** Each one must have a clear answer to: "where did the inventory data go?"
+
+4. **Multiplayer packet handlers are especially dangerous.** The server might remove a bag NPC based on a client request, but the client's inventory operation could fail. Prefer client-authoritative flows where the client confirms success before the server removes the bag.
+
+5. **When adding new features, grep for all bag destruction points** (`NPC.active = false`, `SavedInventory.Clear()`, `Item.active = false`, `TurnToAir`) and verify each one still has a safe data path under the new feature's conditions.

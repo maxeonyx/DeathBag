@@ -84,10 +84,44 @@ public sealed class DeathBagItem : ModItem
         string kindLabel = Kind == BagKind.Loadout ? "Loadout" : "Death Bag";
         tooltips.Add(new TooltipLine(Mod, "BagKind", kindLabel));
         tooltips.Add(new TooltipLine(Mod, "BagOwner", $"Contains {owner}'s items ({SavedInventory.Count} items)"));
-        tooltips.Add(new TooltipLine(Mod, "BagHint", "Drop near the owner to deliver")
+
+        bool isOwner = Main.LocalPlayer.name == OwnerName;
+        if (isOwner)
         {
-            OverrideColor = Color.Gray,
-        });
+            tooltips.Add(new TooltipLine(Mod, "BagHint", "Right-click to open")
+            {
+                OverrideColor = Color.Gray,
+            });
+        }
+        else
+        {
+            tooltips.Add(new TooltipLine(Mod, "BagHint", "Drop near the owner to deliver")
+            {
+                OverrideColor = Color.Gray,
+            });
+        }
+    }
+
+    public override bool CanRightClick()
+    {
+        // Owner can right-click to dump contents into inventory
+        return Main.LocalPlayer.name == OwnerName && SavedInventory.Count > 0;
+    }
+
+    public override void RightClick(Player player)
+    {
+        // Dump bag contents into inventory using normal pickup logic
+        // (stacking onto existing, then empty slots, overflow drops on ground)
+        Mod.Logger.Info($"[DeathBag] Opening bag item: {SavedInventory.Count} items for {player.name}");
+
+        foreach (var (_, savedItem) in SavedInventory)
+        {
+            Item toDump = savedItem.Clone();
+            player.QuickSpawnItem(player.GetSource_OpenItem(Item.type), toDump, toDump.stack);
+        }
+
+        SavedInventory.Clear();
+        // Item is consumed by vanilla's right-click handling (stack decremented)
     }
 
     /// <summary>
