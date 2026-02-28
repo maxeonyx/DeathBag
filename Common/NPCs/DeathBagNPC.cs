@@ -251,6 +251,10 @@ public sealed class DeathBagNPC : ModNPC
             Main.NewText($"Picked up {OwnerName}'s {kindName}.", Color.Green);
         }
 
+        // Properly close the NPC chat UI so the NPC becomes clickable again.
+        // Main.npcChatText = "" alone is insufficient — it clears text but leaves
+        // Player.talkNPC pointing at this NPC, locking the player in chat state.
+        Main.LocalPlayer.SetTalkNPC(-1);
         Main.npcChatText = "";
     }
 
