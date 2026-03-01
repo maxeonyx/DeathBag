@@ -85,6 +85,53 @@ Non-owners can right-click any bag to pick it up as an inventory item (DeathBagI
 
 When the carrier drops a bag item (right-click drop), it converts back to a normal bag NPC — identical to death-spawned or station-spawned bags, no special delivery logic.
 
+### 10. Bag Item Protection
+
+Bag items contain irreplaceable inventory and must not be accidentally destroyed. Bag items cannot be trashed or sold:
+
+- **Ctrl+click trash/sell:** Drops the bag on the ground instead of trashing/selling
+- **Manual click-to-trash:** If a bag item ends up in the trash slot (by any path), it ejects to the ground next tick
+- **Shop sell:** Blocked entirely — item stays on cursor
+- **Dropping on the ground is always allowed** — that's how bags convert back to NPC form
+
+### 11. Bag Item Tooltips
+
+Bag item tooltips are concise. The item name already contains the owner and bag type ("Max's Death Bag" or "Max's Loadout"), so tooltips avoid redundancy.
+
+**Death bag, owner** (rare edge case — e.g. retrieved from a chest):
+```
+Max's Death Bag
+12 items
+Right-click to empty
+```
+
+**Death bag, non-owner:**
+```
+Max's Death Bag
+12 items
+Drop to return to Max
+```
+
+**Loadout bag, owner** (the primary use case — just created at station):
+```
+Max's Loadout
+12 items
+Place to use as a loadout
+Right-click to empty
+```
+
+**Loadout bag, non-owner:**
+```
+Max's Loadout
+12 items
+Drop to return to Max
+```
+
+Key distinctions:
+- Loadout bags emphasize **placement** as the primary action (place in world → right-click NPC to restore)
+- "Right-click to empty" communicates this is a destructive dump, not a careful restore
+- "Drop to return to [name]" for non-owners — simple, no special delivery mechanic
+
 ## Stretch Goals
 
 ### Death Bag Restore Swaps Current Inventory Into a Bag
@@ -133,6 +180,10 @@ Currently bags save everything. The plan is to eventually:
 ### DefaultTools (separate mod idea)
 
 Instead of spawning with copper tool items, tool slots have a special background showing the copper tool. The slot behaves as a copper tool when empty — it's a default, not an item. Partially redundant with Death Bag but still useful for secondary loadout management.
+
+### Left-Click Bag Placement
+
+Currently dropping a bag item places it at the player's feet. Left-clicking with a bag on the cursor should place it at the cursor's world position (like placing a tile/block), giving precise control over where the bag NPC spawns.
 
 ## Open Questions
 

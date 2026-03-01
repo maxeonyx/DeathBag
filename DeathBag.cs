@@ -156,26 +156,6 @@ public sealed class DeathBag : Mod
             return;
 
         Player localPlayer = Main.LocalPlayer;
-
-        // Find empty inventory slot
-        int emptySlot = -1;
-        for (int i = 0; i < 50; i++)
-        {
-            if (localPlayer.inventory[i] == null || localPlayer.inventory[i].IsAir)
-            {
-                emptySlot = i;
-                break;
-            }
-        }
-
-        if (emptySlot < 0)
-        {
-            Logger.Warn($"[DeathBag] Client: no room for {ownerName}'s bag item — bag NPC preserved on server");
-            Main.NewText("No room in your inventory!", Microsoft.Xna.Framework.Color.Yellow);
-            // Do NOT send BagRemoved — the NPC stays alive on the server
-            return;
-        }
-
         string kindName = kind == BagKind.Loadout ? "Loadout" : "Death Bag";
 
         // Create the bag item in our own inventory (client-authoritative)
@@ -190,17 +170,37 @@ public sealed class DeathBag : Mod
             bagItem.CarrierName = carrierName;
         }
         item.SetNameOverride($"{ownerName}'s {kindName}");
-        localPlayer.inventory[emptySlot] = item;
+
+        Item remainder = localPlayer.GetItem(localPlayer.whoAmI, item, GetItemSettings.NPCEntityToPlayerInventorySettings);
+        if (remainder is not null && !remainder.IsAir)
+        {
+            Logger.Warn($"[DeathBag] Client: no room for {ownerName}'s bag item — bag NPC preserved on server");
+            Main.NewText("No room in your inventory!", Microsoft.Xna.Framework.Color.Yellow);
+            // Do NOT send BagRemoved — the NPC stays alive on the server
+            return;
+        }
 
         // Item placed successfully — NOW tell the server to remove the bag NPC
         SendBagRemoved(this, npcIndex);
 
         LogBagContents(this, "non-owner pickup (MP client)", ownerName, kind, inventory);
 
-        // Sync the new item slot to server
-        NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, localPlayer.whoAmI, emptySlot);
+        // Item placed successfully — sync the slot to server. Find which slot GetItem placed it in.
+        int placedSlot = -1;
+        for (int i = 0; i < 50; i++)
+        {
+            if (localPlayer.inventory[i]?.ModItem is DeathBagItem placed
+                && placed.OwnerName == ownerName && placed.Kind == kind
+                && placed.SavedInventory == inventory)
+            {
+                placedSlot = i;
+                break;
+            }
+        }
+        if (placedSlot >= 0)
+            NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, localPlayer.whoAmI, placedSlot);
 
-        Logger.Info($"[DeathBag] Client: placed {ownerName}'s {kindName} in inventory slot {emptySlot}, sent BagRemoved for NPC {npcIndex}");
+        Logger.Info($"[DeathBag] Client: placed {ownerName}'s {kindName} in inventory slot {placedSlot}, sent BagRemoved for NPC {npcIndex}");
         Main.NewText($"Picked up {ownerName}'s {kindName.ToLower()}.", Microsoft.Xna.Framework.Color.Green);
     }
 

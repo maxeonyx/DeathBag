@@ -24,6 +24,7 @@ public sealed class LoadoutStationItem : ModItem
     {
         // Dungeon-tier: requires dungeon materials
         CreateRecipe()
+            .AddIngredient(ItemID.Wood, 20)
             .AddIngredient(ItemID.Bone, 25)
             .AddIngredient(ItemID.GoldenChest)
             .AddTile(TileID.WorkBenches)

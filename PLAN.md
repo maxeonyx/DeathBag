@@ -78,20 +78,21 @@ Loadout bags use their own textures — both NPC and item.
 
 ## Known Bugs
 
-### Non-owner pickup "no room" leaves NPC unclickable
-After right-clicking a non-owner bag NPC and getting "No room in your inventory!", the NPC stays alive (data safe — this is correct) but becomes unclickable. The chat UI state likely gets stuck, preventing a second interaction. The expected flow is: see "no room" → free up a slot → click again to pick up. Need to investigate whether the chat UI needs explicit cleanup on the "no room" path.
+### Non-owner pickup "no room" leaves NPC unclickable — FIXED
+After right-clicking a non-owner bag NPC and getting "No room in your inventory!", the NPC was unclickable. Fixed by calling `SetTalkNPC(-1)` to properly close the chat UI (not just clearing `npcChatText`).
 
 ## Next Up
 
-### Right-click to open own loadout bags in inventory — IN PROGRESS
-Owner should be able to right-click a loadout bag item in their inventory to dump its contents into their inventory (like a grab bag). This is NOT a full restore — it just dumps items normally.
+### Right-click to open own loadout bags in inventory — DONE
+Owner can right-click a loadout bag item in their inventory to dump its contents into their inventory (like a grab bag). Uses `Player.GetItem` with `NPCEntityToPlayerInventorySettings` for proper stacking/ammo/coin handling. Remainder items that don't fit are dropped with `QuickSpawnItem`.
 
-**Status:** `CanRightClick` and `RightClick` overrides added to `DeathBagItem.cs`. Not yet tested. Uses `QuickSpawnItem` to dump contents.
+### Death bag restore packages current inventory into a bag — DONE
+When restoring a death bag (or loadout bag NPC), the player's current inventory (junk picked up after dying) is packaged into a new loadout bag item in their inventory, not displaced/dropped.
 
-### Death bag restore packages current inventory into a bag — NOT STARTED
-When restoring a death bag, the player's current inventory (junk picked up after dying) should be packaged into a new loadout bag item in their inventory, not displaced/dropped. See VISION.md "Death Bag Restore Swaps Current Inventory Into a Bag".
+**Actual approach:** Simplified from the original plan. `ComputeRestore` and its displaced-item reshuffling logic were removed entirely. Instead: snapshot current inventory (excluding bags/copper tools), create a `DeathBagItem` with `Kind=Loadout`, clear inventory (preserving bags + copper tools), place bag's saved items into their exact slots using `SetSlotByIndex`, then place the loadout bag item into an empty inventory slot (or drop if no room). All slots synced to server in multiplayer.
 
-**Planned approach:** Before restore, snapshot current inventory (excluding bags/copper tools) into a DeathBagItem. Clear those slots in `current` dict. After restore, find empty slot in result for the bag item. ComputeRestore logic stays unchanged.
+### Loadout station recipe — DONE
+Added Wood x20 to loadout station recipe (sprite has wood framing).
 
 ## Test Scenarios
 
@@ -104,3 +105,9 @@ No automated test framework — tModLoader mods are tested manually in-game.
 - Multiplayer: see teammate's bag, can't interact, hover shows name
 - Log out and back in -> bags reappear
 - Die on Softcore -> no bag (mod inactive)
+- Die, pick up junk, restore death bag -> junk goes into loadout bag item in inventory
+- Die with empty inventory after death (only copper tools) -> restore with no loadout bag created
+- Die, restore, right-click loadout bag item -> junk items enter inventory with proper stacking
+- Die, restore with full inventory -> loadout bag item drops on ground, converts to NPC
+- Multiplayer: restore death bag -> all inventory slots synced to server (no desync)
+- Loadout bag NPC: right-click to restore -> current inventory packaged into loadout bag item

@@ -3,6 +3,8 @@ using Terraria;
 using Terraria.ID;
 using Terraria.ModLoader;
 using Terraria.ModLoader.IO;
+using Terraria.UI;
+using DeathBag.Common.Items;
 using DeathBag.Common.NPCs;
 
 namespace DeathBag.Common.Systems;
@@ -13,6 +15,36 @@ namespace DeathBag.Common.Systems;
 /// </summary>
 public sealed class DeathBagState : ModSystem
 {
+    public override void Load()
+    {
+        On_ItemSlot.SellOrTrash += OnSellOrTrash;
+    }
+
+    /// <summary>
+    /// Intercepts Ctrl+click sell/trash: drops the bag item on the ground instead.
+    /// </summary>
+    private static void OnSellOrTrash(On_ItemSlot.orig_SellOrTrash orig, Item[] inv, int context, int slot)
+    {
+        if (inv[slot]?.ModItem is DeathBagItem)
+        {
+            DropBagItem(inv[slot]);
+            inv[slot].TurnToAir();
+            return;
+        }
+
+        orig(inv, context, slot);
+    }
+
+    /// <summary>
+    /// Drops a bag item on the ground at the local player's position.
+    /// The item's Update() will convert it to a bag NPC immediately.
+    /// </summary>
+    private static void DropBagItem(Item item)
+    {
+        Player player = Main.LocalPlayer;
+        player.QuickSpawnItem(player.GetSource_Misc("DeathBagDrop"), item, item.stack);
+    }
+
     public override void SaveWorldData(TagCompound tag)
     {
         var bagList = new List<TagCompound>();
@@ -118,9 +150,14 @@ public sealed class DeathBagState : ModSystem
         for (int i = _pendingBags.Count - 1; i >= 0; i--)
         {
             var data = _pendingBags[i];
+            // NewNPC takes bottom-center coordinates, but we save top-left (npc.position).
+            // Convert: bottom-center X = position.X + width/2, Y = position.Y + height.
+            // Our bags are always 48x48 (SetDefaults).
+            int spawnX = (int)data.X + 24;
+            int spawnY = (int)data.Y + 48;
             int npcIndex = NPC.NewNPC(
                 Terraria.Entity.GetSource_NaturalSpawn(),
-                (int)data.X, (int)data.Y,
+                spawnX, spawnY,
                 ModContent.NPCType<DeathBagNPC>());
 
             if (npcIndex < 0 || npcIndex >= Main.maxNPCs)

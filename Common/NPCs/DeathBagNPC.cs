@@ -214,22 +214,6 @@ public sealed class DeathBagNPC : ModNPC
         else
         {
             // Singleplayer: place item directly in player's inventory
-            int emptySlot = -1;
-            for (int i = 0; i < 50; i++)
-            {
-                if (localPlayer.inventory[i] == null || localPlayer.inventory[i].IsAir)
-                {
-                    emptySlot = i;
-                    break;
-                }
-            }
-
-            if (emptySlot < 0)
-            {
-                Main.NewText("No room in your inventory!", Color.Yellow);
-                return;
-            }
-
             string kindName = Kind == BagKind.Loadout ? "Loadout" : "Death Bag";
             var item = new Item();
             item.SetDefaults(ModContent.ItemType<Items.DeathBagItem>());
@@ -242,7 +226,13 @@ public sealed class DeathBagNPC : ModNPC
                 bagItem.CarrierName = localPlayer.name;
             }
             item.SetNameOverride($"{OwnerName}'s {kindName}");
-            localPlayer.inventory[emptySlot] = item;
+
+            Item remainder = localPlayer.GetItem(localPlayer.whoAmI, item, GetItemSettings.NPCEntityToPlayerInventorySettings);
+            if (remainder is not null && !remainder.IsAir)
+            {
+                Main.NewText("No room in your inventory!", Color.Yellow);
+                return;
+            }
 
             DB.LogBagContents(Mod, "non-owner pickup (SP)", OwnerName, Kind, SavedInventory);
             NPC.active = false;
@@ -251,11 +241,7 @@ public sealed class DeathBagNPC : ModNPC
             Main.NewText($"Picked up {OwnerName}'s {kindName}.", Color.Green);
         }
 
-        // Properly close the NPC chat UI so the NPC becomes clickable again.
-        // Main.npcChatText = "" alone is insufficient — it clears text but leaves
-        // Player.talkNPC pointing at this NPC, locking the player in chat state.
-        Main.LocalPlayer.SetTalkNPC(-1);
-        Main.npcChatText = "";
+        Main.CloseNPCChatOrSign();
     }
 
     public override bool CheckActive()

@@ -188,13 +188,17 @@ def process_bag_sprite(raw_path, npc_path, item_path,
     print(f"  Item sprite: {half_canvas}x{half_canvas} -> 2x -> {item_sprite.size} -> {item_path}")
 
 
-def process_tile_sprite(raw_path, tile_path, item_path,
+def process_tile_sprite(raw_path, tile_path, item_path, highlight_path=None,
                         tile_width=3, tile_height=3, item_size=48, max_colors=32):
     """Process a raw tile image into a tile sprite sheet and item sprite.
 
     Tile sprite sheets use 16px tiles with 2px padding between them.
     Works at half resolution then doubles pixels to match Terraria's
     2x2 game-pixel aesthetic. Each tile cell is 8x8 game-pixels (16x16 real).
+
+    If highlight_path is given, also generates a smart-interact highlight
+    texture (white border pixels) from the continuous half-res content,
+    before slicing into tile cells.
     """
     raw = Image.open(raw_path).convert("RGBA")
     cropped = autocrop(raw)
@@ -228,6 +232,22 @@ def process_tile_sprite(raw_path, tile_path, item_path,
     sheet.save(tile_path)
     print(f"  Tile sprite: {half_sheet_w}x{half_sheet_h} -> 2x -> {sheet.size} -> {tile_path}")
 
+    # Highlight texture: border detection on continuous half-res, then same slice+double
+    if highlight_path is not None:
+        half_highlight = border_mask(content_clean)
+        half_highlight_sheet = Image.new("RGBA", (half_sheet_w, half_sheet_h), (0, 0, 0, 0))
+        for ty in range(tile_height):
+            for tx in range(tile_width):
+                src_x = tx * half_tile
+                src_y = ty * half_tile
+                piece = half_highlight.crop((src_x, src_y, src_x + half_tile, src_y + half_tile))
+                dst_x = tx * (half_tile + half_gap)
+                dst_y = ty * (half_tile + half_gap)
+                half_highlight_sheet.paste(piece, (dst_x, dst_y))
+        highlight_sheet = double_pixels(half_highlight_sheet)
+        highlight_sheet.save(highlight_path)
+        print(f"  Highlight: {half_sheet_w}x{half_sheet_h} -> 2x -> {highlight_sheet.size} -> {highlight_path}")
+
     # Item sprite: half res then double
     half_item = item_size // 2
     item_scaled = scale_to_fill(pad_to_square(cropped), half_item, padding=1)
@@ -254,6 +274,35 @@ def process_mod_icon(raw_path, icon_path, target_size=480):
     print(f"  Icon: {filled.size} -> {icon_path}")
 
 
+def border_mask(img):
+    """Return an image with white border pixels of opaque regions.
+
+    Works on a continuous image (no spritesheet gaps). An opaque pixel is
+    a border pixel if any 4-connected neighbor is transparent or out of bounds.
+    """
+    px = img.load()
+    w, h = img.size
+    mask = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    mpx = mask.load()
+
+    for y in range(h):
+        for x in range(w):
+            if px[x, y][3] >= 128:
+                is_border = False
+                for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                    nx, ny = x + dx, y + dy
+                    if nx < 0 or nx >= w or ny < 0 or ny >= h:
+                        is_border = True
+                        break
+                    if px[nx, ny][3] < 128:
+                        is_border = True
+                        break
+                if is_border:
+                    mpx[x, y] = (255, 255, 255, 255)
+
+    return mask
+
+
 if __name__ == "__main__":
     print("Processing death bag...")
     process_bag_sprite(
@@ -274,6 +323,7 @@ if __name__ == "__main__":
         "loadoutstation-raw.png",
         "Common/Tiles/LoadoutStationTile.png",
         "Common/Items/LoadoutStationItem.png",
+        highlight_path="Common/Tiles/LoadoutStationTile_Highlight.png",
     )
 
     print("\nProcessing mod icon...")

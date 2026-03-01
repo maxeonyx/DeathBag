@@ -5,6 +5,7 @@ using Terraria.ID;
 using Terraria.Localization;
 using Terraria.ModLoader;
 using Terraria.ObjectData;
+using Terraria.GameContent.ObjectInteractions;
 using DeathBag.Common.Items;
 using DeathBag.Common.NPCs;
 using DeathBag.Common.Players;
@@ -23,6 +24,7 @@ public sealed class LoadoutStationTile : ModTile
         Main.tileNoAttach[Type] = true;
         Main.tileSolidTop[Type] = false;
         TileID.Sets.DisableSmartCursor[Type] = true;
+        TileID.Sets.HasOutlines[Type] = true;
 
         DustType = DustID.Bone;
 
@@ -58,27 +60,10 @@ public sealed class LoadoutStationTile : ModTile
 
         int loadoutIndex = player.CurrentLoadoutIndex;
 
-        // Find an empty inventory slot for the bag item
-        int emptySlot = -1;
-        for (int s = 0; s < 50; s++)
-        {
-            if (player.inventory[s] == null || player.inventory[s].IsAir)
-            {
-                emptySlot = s;
-                break;
-            }
-        }
-
-        if (emptySlot < 0)
-        {
-            Main.NewText("No room in your inventory for a loadout bag!", Color.Yellow);
-            return true;
-        }
-
         // Clear the snapshotted items from inventory (keep bag items)
         ClearSnapshotFromInventory(player, snapshot);
 
-        // Create loadout bag item in inventory
+        // Create loadout bag item and place in inventory
         var item = new Item();
         item.SetDefaults(ModContent.ItemType<DeathBagItem>());
         if (item.ModItem is DeathBagItem bagItem)
@@ -90,11 +75,28 @@ public sealed class LoadoutStationTile : ModTile
             bagItem.CarrierName = player.name;
         }
         item.SetNameOverride($"{player.name}'s Loadout");
-        player.inventory[emptySlot] = item;
+
+        Item remainder = player.GetItem(player.whoAmI, item, GetItemSettings.NPCEntityToPlayerInventorySettings);
+        if (remainder is not null && !remainder.IsAir)
+        {
+            // This shouldn't happen — we just cleared inventory — but handle it safely
+            player.QuickSpawnItem(player.GetSource_Misc("DeathBagLoadout"), remainder, remainder.stack);
+            Mod.Logger.Warn("[DeathBag] Loadout station: no room after clear — dropped bag item");
+        }
 
         // Sync the new item slot to server
         if (Main.netMode == NetmodeID.MultiplayerClient)
-            NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, player.whoAmI, emptySlot);
+        {
+            for (int s = 0; s < 50; s++)
+            {
+                if (player.inventory[s]?.ModItem is DeathBagItem placed
+                    && placed.OwnerName == player.name && placed.SavedInventory == snapshot)
+                {
+                    NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, player.whoAmI, s);
+                    break;
+                }
+            }
+        }
 
         Main.NewText($"Created loadout bag with {snapshot.Count} items.", new Color(140, 180, 255));
         Mod.Logger.Info($"[DeathBag] Loadout station: created bag item with {snapshot.Count} items for {player.name}, loadout {loadoutIndex}");
@@ -155,6 +157,11 @@ public sealed class LoadoutStationTile : ModTile
                     NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, player.whoAmI, i);
             }
         }
+    }
+
+    public override bool HasSmartInteract(int i, int j, SmartInteractScanSettings settings)
+    {
+        return true;
     }
 
     public override void NumDust(int i, int j, bool fail, ref int num)

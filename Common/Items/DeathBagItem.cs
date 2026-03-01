@@ -50,8 +50,10 @@ public sealed class DeathBagItem : ModItem
         Item.maxStack = 1;
         Item.rare = ItemRarityID.Orange;
         Item.value = 0;
-        // Not usable, not placeable, not consumable
-        Item.useStyle = ItemUseStyleID.None;
+        Item.useStyle = ItemUseStyleID.Swing;
+        Item.useTime = 15;
+        Item.useAnimation = 15;
+        Item.consumable = true;
         Item.noUseGraphic = true;
     }
 
@@ -80,26 +82,65 @@ public sealed class DeathBagItem : ModItem
 
     public override void ModifyTooltips(List<TooltipLine> tooltips)
     {
-        string owner = string.IsNullOrEmpty(OwnerName) ? "Unknown Player" : OwnerName;
-        string kindLabel = Kind == BagKind.Loadout ? "Loadout" : "Death Bag";
-        tooltips.Add(new TooltipLine(Mod, "BagKind", kindLabel));
-        tooltips.Add(new TooltipLine(Mod, "BagOwner", $"Contains {owner}'s items ({SavedInventory.Count} items)"));
+        tooltips.Add(new TooltipLine(Mod, "BagContents", $"{SavedInventory.Count} items"));
 
         bool isOwner = Main.LocalPlayer.name == OwnerName;
         if (isOwner)
         {
-            tooltips.Add(new TooltipLine(Mod, "BagHint", "Right-click to open")
+            if (Kind == BagKind.Loadout)
+            {
+                tooltips.Add(new TooltipLine(Mod, "BagPlace", "Place to use as a loadout")
+                {
+                    OverrideColor = Color.Gray,
+                });
+            }
+
+            tooltips.Add(new TooltipLine(Mod, "BagEmpty", "Right-click to empty")
             {
                 OverrideColor = Color.Gray,
             });
         }
         else
         {
-            tooltips.Add(new TooltipLine(Mod, "BagHint", "Drop near the owner to deliver")
+            string name = string.IsNullOrEmpty(OwnerName) ? "the owner" : OwnerName;
+            tooltips.Add(new TooltipLine(Mod, "BagReturn", $"Drop to return to {name}")
             {
                 OverrideColor = Color.Gray,
             });
         }
+    }
+
+    public override bool CanUseItem(Player player)
+    {
+        // Only usable if it has contents and cursor is within tile placement range
+        if (SavedInventory.Count == 0)
+            return false;
+
+        Vector2 mouseWorld = Main.MouseWorld;
+        float dist = Vector2.Distance(player.Center, mouseWorld);
+        float maxRange = Player.tileRangeX * 16f;
+        return dist <= maxRange;
+    }
+
+    public override bool? UseItem(Player player)
+    {
+        if (Main.netMode == NetmodeID.Server)
+            return true;
+
+        Vector2 mouseWorld = Main.MouseWorld;
+
+        // NewNPC treats coordinates as bottom-center, so offset upward
+        // by half the bag height (48/2 = 24) so the bag's center lands at the click.
+        Vector2 spawnPos = new(mouseWorld.X, mouseWorld.Y + 24f);
+
+        // Spawn the bag NPC at cursor position
+        var modPlayer = player.GetModPlayer<Players.DeathBagPlayer>();
+        modPlayer.SpawnBagNPC(spawnPos, SavedInventory, DeathLoadoutIndex, Kind, OwnerName);
+
+        DB.LogBagContents(Mod, "placed bag via left-click", OwnerName, Kind, SavedInventory);
+        SavedInventory = new();
+
+        return true; // consumed
     }
 
     public override bool CanRightClick()
@@ -110,14 +151,16 @@ public sealed class DeathBagItem : ModItem
 
     public override void RightClick(Player player)
     {
-        // Dump bag contents into inventory using normal pickup logic
-        // (stacking onto existing, then empty slots, overflow drops on ground)
+        // Dump bag contents into inventory using GetItem for proper stacking/ammo/coin handling.
+        // Any remainder that doesn't fit is dropped on the ground.
         DB.LogBagContents(Mod, "owner opened bag item", OwnerName, Kind, SavedInventory);
 
         foreach (var (_, savedItem) in SavedInventory)
         {
             Item toDump = savedItem.Clone();
-            player.QuickSpawnItem(player.GetSource_OpenItem(Item.type), toDump, toDump.stack);
+            Item remainder = player.GetItem(player.whoAmI, toDump, GetItemSettings.NPCEntityToPlayerInventorySettings);
+            if (remainder is not null && !remainder.IsAir)
+                player.QuickSpawnItem(player.GetSource_OpenItem(Item.type), remainder, remainder.stack);
         }
 
         SavedInventory.Clear();
