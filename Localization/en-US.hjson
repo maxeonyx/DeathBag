@@ -3,7 +3,7 @@ Mods: {
 		Items: {
 			DeathBagItem: {
 				DisplayName: Death Bag
-				Tooltip: Contains a player's inventory snapshot
+				Tooltip: ""
 			}
 			LoadoutStationItem: {
 				DisplayName: Loadout Station

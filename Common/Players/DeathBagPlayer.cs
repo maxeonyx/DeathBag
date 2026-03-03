@@ -11,6 +11,10 @@ namespace DeathBag.Common.Players;
 
 public sealed class DeathBagPlayer : ModPlayer
 {
+    // Sentinel slot index used to represent the cursor item (Main.mouseItem).
+    // This is not a real inventory slot, so restore code must handle it specially.
+    private const int CursorSlotSentinel = -1;
+
     /// <summary>
     /// Snapshot taken at moment of death, before vanilla drops items.
     /// Null when no snapshot is pending.
@@ -36,6 +40,57 @@ public sealed class DeathBagPlayer : ModPlayer
         ItemID.CopperAxe,
     };
 
+    private static bool IsPreservedDuringRestore(Item item)
+    {
+        if (item is null || item.IsAir)
+            return false;
+        if (item.ModItem is Items.DeathBagItem)
+            return true;
+        if (CopperTools.Contains(item.type))
+            return true;
+        return false;
+    }
+
+    private List<(int SlotIndex, Item Item)> ExtractPreservedItemsFromMainInventory()
+    {
+        // Only main inventory can hold items like DeathBagItem; armor/dye etc are handled separately.
+        var extracted = new List<(int, Item)>();
+        for (int i = 0; i < Player.inventory.Length; i++)
+        {
+            Item item = Player.inventory[i];
+            if (IsPreservedDuringRestore(item))
+            {
+                extracted.Add((i, item.Clone()));
+                Player.inventory[i] = new Item();
+            }
+        }
+        return extracted;
+    }
+
+    private void ReinsertPreservedItemsIntoMainInventory(List<(int SlotIndex, Item Item)> extracted)
+    {
+        foreach (var (slotIndex, savedItem) in extracted)
+        {
+            Item item = savedItem.Clone();
+
+            // Try original slot first (keeps UI layout stable when possible)
+            if (slotIndex >= 0 && slotIndex < Player.inventory.Length)
+            {
+                Item cur = Player.inventory[slotIndex];
+                if (cur is null || cur.IsAir)
+                {
+                    Player.inventory[slotIndex] = item;
+                    continue;
+                }
+            }
+
+            // Fall back to normal inventory placement. Any remainder drops.
+            Item remainder = Player.GetItem(Player.whoAmI, item, GetItemSettings.NPCEntityToPlayerInventorySettings);
+            if (remainder is not null && !remainder.IsAir)
+                Player.QuickSpawnItem(Player.GetSource_Misc("DeathBagPreservedReinsert"), remainder, remainder.stack);
+        }
+    }
+
     public override bool PreKill(double damage, int hitDirection, bool pvp, ref bool playSound,
         ref bool genDust, ref PlayerDeathReason damageSource)
     {
@@ -49,23 +104,40 @@ public sealed class DeathBagPlayer : ModPlayer
         _deathSnapshot = SnapshotInventory();
         _deathLoadoutIndex = Player.CurrentLoadoutIndex;
 
+        // Include cursor item (item on the mouse). Vanilla can clear it on death and our
+        // inventory clear prevents it from being dropped, so we must capture it explicitly.
+        // We store it with a sentinel slot index and handle it during restore via GetItem.
+        bool capturedCursorItem = false;
+        if (Main.mouseItem is not null && !Main.mouseItem.IsAir)
+        {
+            Item cursor = Main.mouseItem;
+            bool isCopperTool = CopperTools.Contains(cursor.type);
+            bool isBagItem = cursor.ModItem is Items.DeathBagItem;
+            if (!isCopperTool && !isBagItem)
+            {
+                _deathSnapshot.Add((CursorSlotSentinel, cursor.Clone()));
+                capturedCursorItem = true;
+                Mod.Logger.Info($"[DeathBag] PreKill: captured cursor item {cursor.Name} x{cursor.stack}");
+            }
+        }
+
         // Filter out copper tools and bag items — these are never worth bagging
         _deathSnapshot.RemoveAll(entry =>
             CopperTools.Contains(entry.Item.type) || entry.Item.ModItem is Items.DeathBagItem);
 
         Mod.Logger.Info($"[DeathBag] PreKill: snapshotted {_deathSnapshot.Count} items for {Player.name} (after filtering copper tools + bag items)");
 
-        // If only coins remain, let vanilla scatter them — not worth a bag
-        bool onlyCoins = _deathSnapshot.Count > 0 && _deathSnapshot.TrueForAll(entry => entry.Item.IsACoin);
-        if (_deathSnapshot.Count == 0 || onlyCoins)
+        if (_deathSnapshot.Count == 0)
         {
-            if (onlyCoins)
-                Mod.Logger.Info("[DeathBag] PreKill: only coins, letting vanilla drop them");
-            else
-                Mod.Logger.Info("[DeathBag] PreKill: empty inventory, no bag will spawn");
+            Mod.Logger.Info("[DeathBag] PreKill: empty inventory, no bag will spawn");
             _deathSnapshot = null;
             return true;
         }
+
+        // If we captured the cursor item for bagging, clear it now so it can't remain on the cursor
+        // while also being saved into the bag snapshot.
+        if (capturedCursorItem)
+            Main.mouseItem = new Item();
 
         // Clear inventory so vanilla's DropItems finds nothing to scatter —
         // EXCEPT DeathBagItems (carried bags) and copper tools, which vanilla will drop naturally.
@@ -180,6 +252,10 @@ public sealed class DeathBagPlayer : ModPlayer
         }
 
         // === 1. SNAPSHOT current inventory (excluding copper tools + bag items) ===
+        // IMPORTANT: copper tools and bag items are preserved, but bag restore writes exact slot indices.
+        // If we leave preserved items in place, they can be overwritten (data loss). Extract them first.
+        var preserved = ExtractPreservedItemsFromMainInventory();
+
         var currentSnapshot = SnapshotInventory();
         currentSnapshot.RemoveAll(entry =>
             CopperTools.Contains(entry.Item.type) || entry.Item.ModItem is Items.DeathBagItem);
@@ -203,12 +279,23 @@ public sealed class DeathBagPlayer : ModPlayer
         }
 
         // === 3. CLEAR inventory (preserving copper tools + bag items) ===
-        ClearInventory(preserveBagItems: true, preserveCopperTools: true);
+        // We already extracted preserved items from main inventory, so it's safe (and simpler)
+        // to clear everything without special cases.
+        ClearInventory(preserveBagItems: false, preserveCopperTools: false);
 
         // === 4. PLACE bag's saved items into their exact original slots ===
+        // Cursor item uses a sentinel slot index and is restored via GetItem.
         foreach (var (slotIndex, savedItem) in bag.SavedInventory)
         {
             Item item = savedItem.Clone();
+            if (slotIndex < 0)
+            {
+                Item remainder = Player.GetItem(Player.whoAmI, item, GetItemSettings.NPCEntityToPlayerInventorySettings);
+                if (remainder is not null && !remainder.IsAir)
+                    Player.QuickSpawnItem(Player.GetSource_Misc("DeathBagRestoreCursor"), remainder, remainder.stack);
+                continue;
+            }
+
             SetSlotByIndex(slotIndex, item);
         }
 
@@ -228,6 +315,9 @@ public sealed class DeathBagPlayer : ModPlayer
                 Mod.Logger.Info("[DeathBag] Placed loadout bag item in inventory");
             }
         }
+
+        // Reinsert preserved items (bag items, copper tools) after restore so they can't be overwritten.
+        ReinsertPreservedItemsIntoMainInventory(preserved);
 
         // Defer NPC removal to next tick (removing mid-frame can crash)
         _pendingBagRemoval = bag.NPC.whoAmI;

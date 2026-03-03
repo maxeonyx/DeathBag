@@ -41,6 +41,19 @@ public sealed class LoadoutStationTile : ModTile
         if (Main.netMode == NetmodeID.Server)
             return false;
 
+        // Don't activate if player is talking to an NPC (e.g. bag NPC on top of station)
+        if (Main.LocalPlayer.talkNPC >= 0)
+            return false;
+
+        // Don't activate if a bag NPC is under the cursor (owner right-click is handled in AI)
+        Vector2 mouseWorld = Main.MouseWorld;
+        for (int n = 0; n < Main.maxNPCs; n++)
+        {
+            NPC npc = Main.npc[n];
+            if (npc.active && npc.ModNPC is DeathBagNPC && npc.Hitbox.Contains(mouseWorld.ToPoint()))
+                return false;
+        }
+
         Player player = Main.LocalPlayer;
         var modPlayer = player.GetModPlayer<DeathBagPlayer>();
 
@@ -51,6 +64,14 @@ public sealed class LoadoutStationTile : ModTile
             || entry.Item.type == ItemID.CopperShortsword
             || entry.Item.type == ItemID.CopperPickaxe
             || entry.Item.type == ItemID.CopperAxe);
+
+        // Cursor item dupe safety: the cursor item is effectively an inventory slot in Terraria.
+        // Don't include it in loadout station snapshots unless we can atomically clear it too.
+        // Slot 58 is the cursor/held-item slot.
+        const int cursorSlotIndex = 58;
+        bool removedCursorSlot = snapshot.RemoveAll(entry => entry.SlotIndex == cursorSlotIndex) > 0;
+        if (removedCursorSlot)
+            Mod.Logger.Info("[DeathBag] Loadout station: excluded cursor slot (58) from snapshot to prevent dupe");
 
         if (snapshot.Count == 0)
         {

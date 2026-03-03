@@ -282,6 +282,11 @@ public sealed class DeathBagItem : ModItem
                 SavedInventory.Add((slot, item));
             }
         }
+
+        // Restore display name (SetNameOverride doesn't persist through save/load)
+        string kindName = Kind == BagKind.Loadout ? "Loadout" : "Death Bag";
+        if (!string.IsNullOrEmpty(OwnerName))
+            Item.SetNameOverride($"{OwnerName}'s {kindName}");
     }
 
     public override void NetSend(BinaryWriter writer)
@@ -300,5 +305,10 @@ public sealed class DeathBagItem : ModItem
         DeathLoadoutIndex = reader.ReadInt32();
         CarrierName = reader.ReadString();
         SavedInventory = DB.ReadInventory(reader);
+
+        // Restore display name after net sync
+        string kindName = Kind == BagKind.Loadout ? "Loadout" : "Death Bag";
+        if (!string.IsNullOrEmpty(OwnerName))
+            Item.SetNameOverride($"{OwnerName}'s {kindName}");
     }
 }
