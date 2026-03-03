@@ -274,6 +274,48 @@ def process_mod_icon(raw_path, icon_path, target_size=480):
     print(f"  Icon: {filled.size} -> {icon_path}")
 
 
+def process_mod_icon_pixelated(bg_path, bag_path, icon_path, base_pixels=48, target_size=480,
+                               bag_pixels=38, max_colors=64):
+    """Generate a Terraria-style pixelated mod icon.
+
+    Builds a base_pixels x base_pixels image ("big pixels") and scales it up to target_size
+    with nearest-neighbor. The background is quantized and the DeathBag sprite is overlaid.
+    """
+    if target_size % base_pixels != 0:
+        raise ValueError("target_size must be divisible by base_pixels")
+
+    bg = Image.open(bg_path).convert("RGBA")
+    bg = pad_to_square(autocrop(bg))
+    bg_small = bg.resize((base_pixels, base_pixels), Image.LANCZOS)
+    bg_small = quantize_colors(bg_small, max_colors=max_colors)
+
+    bag = Image.open(bag_path).convert("RGBA")
+    # Convert 2x2 pixels -> 1x1 game pixels, then scale to desired size.
+    bag_game = bag.resize((bag.width // 2, bag.height // 2), Image.NEAREST)
+    bag_scaled = bag_game.resize((bag_pixels, bag_pixels), Image.NEAREST)
+
+    # Subtle shadow (1px down-right in base pixel grid)
+    shadow = Image.new("RGBA", bag_scaled.size, (0, 0, 0, 0))
+    spx = shadow.load()
+    bpx = bag_scaled.load()
+    bw, bh = bag_scaled.size
+    for y in range(bh):
+        for x in range(bw):
+            if bpx[x, y][3] >= 128:
+                spx[x, y] = (0, 0, 0, 110)
+
+    base = bg_small.copy()
+    ox = (base_pixels - bag_pixels) // 2
+    oy = (base_pixels - bag_pixels) // 2
+    base.alpha_composite(shadow, (ox + 1, oy + 1))
+    base.alpha_composite(bag_scaled, (ox, oy))
+
+    scale = target_size // base_pixels
+    icon = base.resize((base_pixels * scale, base_pixels * scale), Image.NEAREST)
+    icon.save(icon_path)
+    print(f"  Pixel icon: {base_pixels}x{base_pixels} -> {icon.size} -> {icon_path}")
+
+
 def border_mask(img):
     """Return an image with white border pixels of opaque regions.
 
@@ -327,8 +369,9 @@ if __name__ == "__main__":
     )
 
     print("\nProcessing mod icon...")
-    process_mod_icon(
-        "modicon-raw.png",
+    process_mod_icon_pixelated(
+        "modicon-bg.png",
+        "Common/NPCs/DeathBagNPC.png",
         "icon.png",
     )
 
