@@ -388,6 +388,115 @@ public sealed class DeathBagPlayer : ModPlayer
     }
 
     /// <summary>
+    /// Attempts to place an item into the exact slot index, but only if that slot is currently empty.
+    /// Returns true if placed, false if the slot was occupied or unsupported.
+    /// </summary>
+    internal bool TryPlaceInSlotIfEmpty(int slot, Item item)
+    {
+        if (slot < 0)
+            return false;
+
+        if (slot < 59)
+        {
+            Item cur = Player.inventory[slot];
+            if (cur is null || cur.IsAir)
+            {
+                Player.inventory[slot] = item;
+                return true;
+            }
+            return false;
+        }
+
+        if (slot < SlotDye)
+        {
+            int idx = slot - SlotArmor;
+            if (idx < 0 || idx >= Player.armor.Length)
+                return false;
+            Item cur = Player.armor[idx];
+            if (cur is null || cur.IsAir)
+            {
+                Player.armor[idx] = item;
+                return true;
+            }
+            return false;
+        }
+
+        if (slot < SlotMiscEquips)
+        {
+            int idx = slot - SlotDye;
+            if (idx < 0 || idx >= Player.dye.Length)
+                return false;
+            Item cur = Player.dye[idx];
+            if (cur is null || cur.IsAir)
+            {
+                Player.dye[idx] = item;
+                return true;
+            }
+            return false;
+        }
+
+        if (slot < SlotMiscDyes)
+        {
+            int idx = slot - SlotMiscEquips;
+            if (idx < 0 || idx >= Player.miscEquips.Length)
+                return false;
+            Item cur = Player.miscEquips[idx];
+            if (cur is null || cur.IsAir)
+            {
+                Player.miscEquips[idx] = item;
+                return true;
+            }
+            return false;
+        }
+
+        if (slot < SlotLoadoutsStart)
+        {
+            int idx = slot - SlotMiscDyes;
+            if (idx < 0 || idx >= Player.miscDyes.Length)
+                return false;
+            Item cur = Player.miscDyes[idx];
+            if (cur is null || cur.IsAir)
+            {
+                Player.miscDyes[idx] = item;
+                return true;
+            }
+            return false;
+        }
+
+        // Loadout slots: only inactive loadouts are addressable (active loadout is in Player.armor/dye)
+        int loadoutOffset = slot - SlotLoadoutsStart;
+        int loadoutIndex = loadoutOffset / LoadoutSize;
+        int withinLoadout = loadoutOffset % LoadoutSize;
+
+        if (loadoutIndex < 0 || loadoutIndex >= Player.Loadouts.Length)
+            return false;
+        if (loadoutIndex == Player.CurrentLoadoutIndex)
+            return false;
+
+        if (withinLoadout < 20)
+        {
+            Item cur = Player.Loadouts[loadoutIndex].Armor[withinLoadout];
+            if (cur is null || cur.IsAir)
+            {
+                Player.Loadouts[loadoutIndex].Armor[withinLoadout] = item;
+                return true;
+            }
+            return false;
+        }
+
+        int dyeIdx = withinLoadout - 20;
+        if (dyeIdx < 0 || dyeIdx >= Player.Loadouts[loadoutIndex].Dye.Length)
+            return false;
+        Item curDye = Player.Loadouts[loadoutIndex].Dye[dyeIdx];
+        if (curDye is null || curDye.IsAir)
+        {
+            Player.Loadouts[loadoutIndex].Dye[dyeIdx] = item;
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>
     /// Slot index ranges matching SyncEquipment conventions:
     ///   0-58:   Player.inventory
     ///   59-78:  Player.armor (armor, accessories, vanity)

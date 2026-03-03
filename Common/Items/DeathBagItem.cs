@@ -10,6 +10,7 @@ using Terraria.Localization;
 using Terraria.ModLoader;
 using Terraria.ModLoader.IO;
 using DeathBag.Common.NPCs;
+using DeathBag.Common.Players;
 using DB = DeathBag.DeathBag;
 
 namespace DeathBag.Common.Items;
@@ -155,12 +156,31 @@ public sealed class DeathBagItem : ModItem
         // Any remainder that doesn't fit is dropped on the ground.
         DB.LogBagContents(Mod, "owner opened bag item", OwnerName, Kind, SavedInventory);
 
-        foreach (var (_, savedItem) in SavedInventory)
+        // Prefer restoring to original slots when they are free, but never overwrite existing items.
+        // Any items that can't go into their original slot fall back to GetItem placement.
+        var modPlayer = player.GetModPlayer<DeathBagPlayer>();
+        var leftovers = new List<Item>();
+        foreach (var (slotIndex, savedItem) in SavedInventory)
         {
-            Item toDump = savedItem.Clone();
+            Item toRestore = savedItem.Clone();
+            if (slotIndex >= 0 && modPlayer.TryPlaceInSlotIfEmpty(slotIndex, toRestore))
+                continue;
+            leftovers.Add(toRestore);
+        }
+
+        foreach (Item toDump in leftovers)
+        {
             Item remainder = player.GetItem(player.whoAmI, toDump, GetItemSettings.NPCEntityToPlayerInventorySettings);
             if (remainder is not null && !remainder.IsAir)
                 player.QuickSpawnItem(player.GetSource_OpenItem(Item.type), remainder, remainder.stack);
+        }
+
+        // Sync slot state to server (armor/accessories/loadouts aren't covered by vanilla item pickup sync).
+        if (Main.netMode == NetmodeID.MultiplayerClient)
+        {
+            int maxSlot = 99 + player.Loadouts.Length * 30;
+            for (int slot = 0; slot < maxSlot; slot++)
+                NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, player.whoAmI, slot);
         }
 
         SavedInventory.Clear();
