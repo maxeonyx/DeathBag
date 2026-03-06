@@ -12,7 +12,7 @@ Run from the DeathBag directory:
     python create_sprites.py
 """
 
-from PIL import Image
+from PIL import Image, ImageFilter
 
 
 def threshold_alpha(img):
@@ -160,8 +160,69 @@ def quantize_colors(img, max_colors=32):
     return Image.merge("RGBA", (*rgb_back.split(), a_thresh))
 
 
-def process_bag_sprite(raw_path, npc_path, item_path,
-                       canvas_size=48, max_colors=32):
+def stylize_background_game_pixels(img, max_colors=32):
+    """Clean up a tiny background image before final nearest upscale.
+
+    Runs entirely at the bottleneck size (game-pixel grid) to improve edge readability
+    after pixelation without globally shifting the image look.
+    """
+    if img.mode != "RGBA":
+        img = img.convert("RGBA")
+
+    rgb = img.convert("RGB")
+
+    # Conservative palette reduction first.
+    rgb_q = rgb.quantize(
+        colors=max_colors, method=Image.MAXCOVERAGE, dither=Image.NONE
+    ).convert("RGB")
+
+    # Subtle major-edge darkening only (no global contrast/saturation changes).
+    edges = rgb_q.filter(ImageFilter.FIND_EDGES).convert("L")
+    edge_mask = edges.point(lambda p: 44 if p >= 100 else 0)
+    rgb_rgba = rgb_q.convert("RGBA")
+    edge_overlay = Image.new("RGBA", rgb_rgba.size, (0, 0, 0, 0))
+    edge_overlay.putalpha(edge_mask)
+    rgb_rgba.alpha_composite(edge_overlay)
+
+    a = img.split()[3].point(lambda p: 255 if p >= 128 else 0)
+    return Image.merge("RGBA", (*rgb_rgba.convert("RGB").split(), a))
+
+
+def normalize_outer_border_colors(img, dark_color=(36, 27, 24)):
+    """Unify only the outermost border ring to a consistent dark tone.
+
+    Keeps mossy green pixels on the border, but normalizes brown/grey border noise.
+    Operates on the small game-pixel image before nearest-neighbor upscale.
+    """
+    if img.mode != "RGBA":
+        img = img.convert("RGBA")
+
+    out = img.copy()
+    px = out.load()
+    w, h = out.size
+
+    def is_greenish(r, g, b):
+        return g >= r + 10 and g >= b + 10 and g >= 60
+
+    def maybe_normalize(x, y):
+        r, g, b, a = px[x, y]
+        if a < 128:
+            return
+        if is_greenish(r, g, b):
+            return
+        px[x, y] = (dark_color[0], dark_color[1], dark_color[2], 255)
+
+    for x in range(w):
+        maybe_normalize(x, 0)
+        maybe_normalize(x, h - 1)
+    for y in range(h):
+        maybe_normalize(0, y)
+        maybe_normalize(w - 1, y)
+
+    return out
+
+
+def process_bag_sprite(raw_path, npc_path, item_path, canvas_size=48, max_colors=32):
     """Process a raw bag image into NPC and item sprites.
 
     Works at half resolution then doubles pixels (nearest-neighbor 2x)
@@ -178,18 +239,30 @@ def process_bag_sprite(raw_path, npc_path, item_path,
     npc_quantized = quantize_colors(npc_scaled, max_colors=max_colors)
     npc_sprite = double_pixels(npc_quantized)
     npc_sprite.save(npc_path)
-    print(f"  NPC sprite: {half_canvas}x{half_canvas} -> 2x -> {npc_sprite.size} -> {npc_path}")
+    print(
+        f"  NPC sprite: {half_canvas}x{half_canvas} -> 2x -> {npc_sprite.size} -> {npc_path}"
+    )
 
     # Item sprite: same as NPC
     item_scaled = scale_to_fill(squared, half_canvas, padding=1)
     item_quantized = quantize_colors(item_scaled, max_colors=max_colors)
     item_sprite = double_pixels(item_quantized)
     item_sprite.save(item_path)
-    print(f"  Item sprite: {half_canvas}x{half_canvas} -> 2x -> {item_sprite.size} -> {item_path}")
+    print(
+        f"  Item sprite: {half_canvas}x{half_canvas} -> 2x -> {item_sprite.size} -> {item_path}"
+    )
 
 
-def process_tile_sprite(raw_path, tile_path, item_path, highlight_path=None,
-                        tile_width=3, tile_height=3, item_size=48, max_colors=32):
+def process_tile_sprite(
+    raw_path,
+    tile_path,
+    item_path,
+    highlight_path=None,
+    tile_width=3,
+    tile_height=3,
+    item_size=48,
+    max_colors=32,
+):
     """Process a raw tile image into a tile sprite sheet and item sprite.
 
     Tile sprite sheets use 16px tiles with 2px padding between them.
@@ -222,7 +295,9 @@ def process_tile_sprite(raw_path, tile_path, item_path, highlight_path=None,
         for tx in range(tile_width):
             src_x = tx * half_tile
             src_y = ty * half_tile
-            tile_piece = content_clean.crop((src_x, src_y, src_x + half_tile, src_y + half_tile))
+            tile_piece = content_clean.crop(
+                (src_x, src_y, src_x + half_tile, src_y + half_tile)
+            )
             dst_x = tx * (half_tile + half_gap)
             dst_y = ty * (half_tile + half_gap)
             half_sheet.paste(tile_piece, (dst_x, dst_y))
@@ -230,23 +305,31 @@ def process_tile_sprite(raw_path, tile_path, item_path, highlight_path=None,
     # Double pixels to final size
     sheet = double_pixels(half_sheet)
     sheet.save(tile_path)
-    print(f"  Tile sprite: {half_sheet_w}x{half_sheet_h} -> 2x -> {sheet.size} -> {tile_path}")
+    print(
+        f"  Tile sprite: {half_sheet_w}x{half_sheet_h} -> 2x -> {sheet.size} -> {tile_path}"
+    )
 
     # Highlight texture: border detection on continuous half-res, then same slice+double
     if highlight_path is not None:
         half_highlight = border_mask(content_clean)
-        half_highlight_sheet = Image.new("RGBA", (half_sheet_w, half_sheet_h), (0, 0, 0, 0))
+        half_highlight_sheet = Image.new(
+            "RGBA", (half_sheet_w, half_sheet_h), (0, 0, 0, 0)
+        )
         for ty in range(tile_height):
             for tx in range(tile_width):
                 src_x = tx * half_tile
                 src_y = ty * half_tile
-                piece = half_highlight.crop((src_x, src_y, src_x + half_tile, src_y + half_tile))
+                piece = half_highlight.crop(
+                    (src_x, src_y, src_x + half_tile, src_y + half_tile)
+                )
                 dst_x = tx * (half_tile + half_gap)
                 dst_y = ty * (half_tile + half_gap)
                 half_highlight_sheet.paste(piece, (dst_x, dst_y))
         highlight_sheet = double_pixels(half_highlight_sheet)
         highlight_sheet.save(highlight_path)
-        print(f"  Highlight: {half_sheet_w}x{half_sheet_h} -> 2x -> {highlight_sheet.size} -> {highlight_path}")
+        print(
+            f"  Highlight: {half_sheet_w}x{half_sheet_h} -> 2x -> {highlight_sheet.size} -> {highlight_path}"
+        )
 
     # Item sprite: half res then double
     half_item = item_size // 2
@@ -254,7 +337,9 @@ def process_tile_sprite(raw_path, tile_path, item_path, highlight_path=None,
     item_quantized = quantize_colors(item_scaled, max_colors=max_colors)
     item_sprite = double_pixels(item_quantized)
     item_sprite.save(item_path)
-    print(f"  Item sprite: {half_item}x{half_item} -> 2x -> {item_sprite.size} -> {item_path}")
+    print(
+        f"  Item sprite: {half_item}x{half_item} -> 2x -> {item_sprite.size} -> {item_path}"
+    )
 
 
 def process_mod_icon(raw_path, icon_path, target_size=480):
@@ -274,46 +359,61 @@ def process_mod_icon(raw_path, icon_path, target_size=480):
     print(f"  Icon: {filled.size} -> {icon_path}")
 
 
-def process_mod_icon_pixelated(bg_path, bag_path, icon_path, base_pixels=48, target_size=480,
-                               bag_pixels=38, max_colors=64):
+def process_mod_icon_pixelated(
+    bg_path,
+    bag_path,
+    icon_path,
+    icon_game_pixels=48,
+    target_size=480,
+    max_colors_bg=32,
+    max_colors_bag=32,
+    bag_fraction=0.5,
+):
     """Generate a Terraria-style pixelated mod icon.
 
-    Builds a base_pixels x base_pixels image ("big pixels") and scales it up to target_size
-    with nearest-neighbor. The background is quantized and the DeathBag sprite is overlaid.
-    """
-    if target_size % base_pixels != 0:
-        raise ValueError("target_size must be divisible by base_pixels")
+    Terraria sprites in this repo are authored at "game pixel" resolution and then
+    doubled 2x with nearest-neighbor. The DeathBag sprite is 48x48 real pixels,
+    meaning it is 24x24 game pixels.
 
+    This icon pipeline:
+    - Background: downscale to icon_game_pixels grid, then upscale with nearest
+    - Bag: keep the in-game sprite as-is (no downsampling), and upscale with nearest
+      to occupy bag_fraction of the final icon width
+    """
+    if target_size % icon_game_pixels != 0:
+        raise ValueError("target_size must be divisible by icon_game_pixels")
+    if not (0.1 <= bag_fraction <= 0.9):
+        raise ValueError("bag_fraction must be between 0.1 and 0.9")
+
+    # Background: fit to square and downscale to game-pixel grid
     bg = Image.open(bg_path).convert("RGBA")
     bg = pad_to_square(autocrop(bg))
-    bg_small = bg.resize((base_pixels, base_pixels), Image.LANCZOS)
-    bg_small = quantize_colors(bg_small, max_colors=max_colors)
 
+    bg_gp = bg.resize((icon_game_pixels, icon_game_pixels), Image.LANCZOS)
+    bg_gp = stylize_background_game_pixels(bg_gp, max_colors=max_colors_bg)
+    bg_gp = normalize_outer_border_colors(bg_gp)
+
+    # Upscale background to final icon
+    scale = target_size // icon_game_pixels
+    icon = bg_gp.resize(
+        (icon_game_pixels * scale, icon_game_pixels * scale), Image.NEAREST
+    )
+
+    # Bag: keep the sprite as-is, upscale to desired fraction of final width
     bag = Image.open(bag_path).convert("RGBA")
-    # Convert 2x2 pixels -> 1x1 game pixels, then scale to desired size.
-    bag_game = bag.resize((bag.width // 2, bag.height // 2), Image.NEAREST)
-    bag_scaled = bag_game.resize((bag_pixels, bag_pixels), Image.NEAREST)
+    bag = quantize_colors(bag, max_colors=max_colors_bag)
+    bag_target = int(target_size * bag_fraction)
+    bag_scale = max(1, bag_target // bag.width)
+    bag_scaled = bag.resize(
+        (bag.width * bag_scale, bag.height * bag_scale), Image.NEAREST
+    )
 
-    # Subtle shadow (1px down-right in base pixel grid)
-    shadow = Image.new("RGBA", bag_scaled.size, (0, 0, 0, 0))
-    spx = shadow.load()
-    bpx = bag_scaled.load()
-    bw, bh = bag_scaled.size
-    for y in range(bh):
-        for x in range(bw):
-            if bpx[x, y][3] >= 128:
-                spx[x, y] = (0, 0, 0, 110)
+    ox = (target_size - bag_scaled.width) // 2
+    oy = (target_size - bag_scaled.height) // 2
+    icon.alpha_composite(bag_scaled, (ox, oy))
 
-    base = bg_small.copy()
-    ox = (base_pixels - bag_pixels) // 2
-    oy = (base_pixels - bag_pixels) // 2
-    base.alpha_composite(shadow, (ox + 1, oy + 1))
-    base.alpha_composite(bag_scaled, (ox, oy))
-
-    scale = target_size // base_pixels
-    icon = base.resize((base_pixels * scale, base_pixels * scale), Image.NEAREST)
     icon.save(icon_path)
-    print(f"  Pixel icon: {base_pixels}x{base_pixels} -> {icon.size} -> {icon_path}")
+    print(f"  Pixel icon: bg={icon_game_pixels}gp bag={bag_scaled.size} -> {icon_path}")
 
 
 def border_mask(img):
