@@ -20,6 +20,7 @@ public enum BagKind : byte
 {
     Death = 0,
     Loadout = 1,
+    Overflow = 2,
 }
 
 /// <summary>
@@ -150,8 +151,8 @@ public sealed class DeathBagNPC : ModNPC
             }
         }
 
-        // === OWNER: loadout bags — right-click to restore (no chat UI) ===
-        if (isOwner && !localPlayer.dead && Kind == BagKind.Loadout)
+        // === OWNER: non-death bags — right-click to restore (no chat UI) ===
+        if (isOwner && !localPlayer.dead && Kind != BagKind.Death)
         {
             Vector2 mouseWorld = Main.MouseWorld;
             if (NPC.Hitbox.Contains(mouseWorld.ToPoint()) && dist <= 192f
@@ -190,7 +191,7 @@ public sealed class DeathBagNPC : ModNPC
     {
         // Only non-owners reach here (CanChat returns false for owner)
         string name = string.IsNullOrEmpty(OwnerName) ? "Unknown Player" : OwnerName;
-        return $"Pick up {name}'s {(Kind == BagKind.Loadout ? "loadout" : "bag")}?";
+        return $"Pick up {name}'s {DB.GetBagKindPromptLabel(Kind)}?";
     }
 
     public override void SetChatButtons(ref string button1, ref string button2)
@@ -214,7 +215,7 @@ public sealed class DeathBagNPC : ModNPC
         else
         {
             // Singleplayer: place item directly in player's inventory
-            string kindName = Kind == BagKind.Loadout ? "Loadout" : "Death Bag";
+            string kindName = DB.GetBagKindName(Kind);
             var item = new Item();
             item.SetDefaults(ModContent.ItemType<Items.DeathBagItem>());
             if (item.ModItem is Items.DeathBagItem bagItem)
@@ -292,7 +293,7 @@ public sealed class DeathBagNPC : ModNPC
         bool isOwner = OwnerPlayerIndex >= 0 && localPlayer.whoAmI == OwnerPlayerIndex;
 
         string hint;
-        if (isOwner && Kind == BagKind.Loadout)
+        if (isOwner && Kind != BagKind.Death)
             hint = "[Right-click to restore]";
         else if (isOwner)
             return; // Death bag owner: auto-pickup, no hint needed
@@ -341,7 +342,7 @@ public sealed class DeathBagNPC : ModNPC
     /// <summary>Keep GivenName in sync with Kind/OwnerName so vanilla's hover text is correct.</summary>
     private void UpdateGivenName()
     {
-        string kindLabel = Kind == BagKind.Loadout ? "Loadout" : "Death Bag";
+        string kindLabel = DB.GetBagKindName(Kind);
         string expected = string.IsNullOrEmpty(OwnerName)
             ? $"Unknown Player's {kindLabel}"
             : $"{OwnerName}'s {kindLabel}";

@@ -91,6 +91,125 @@ public sealed class DeathBagPlayer : ModPlayer
         }
     }
 
+    private static bool IsOverflowBagItem(Item item)
+    {
+        return item?.ModItem is Items.DeathBagItem bagItem && bagItem.Kind == BagKind.Overflow;
+    }
+
+    private static void AppendItemsToBag(Item bagItem, List<(int SlotIndex, Item Item)> items)
+    {
+        if (bagItem.ModItem is not Items.DeathBagItem modBag)
+            return;
+
+        modBag.SavedInventory.AddRange(items);
+        if (!string.IsNullOrEmpty(modBag.OwnerName))
+            bagItem.SetNameOverride($"{modBag.OwnerName}'s {DB.GetBagKindName(modBag.Kind)}");
+    }
+
+    private Item CreateBagItem(BagKind kind, List<(int SlotIndex, Item Item)> savedInventory)
+    {
+        Item bagItem = new();
+        bagItem.SetDefaults(ModContent.ItemType<Items.DeathBagItem>());
+        if (bagItem.ModItem is Items.DeathBagItem deathBagItem)
+        {
+            deathBagItem.Kind = kind;
+            deathBagItem.OwnerName = Player.name;
+            deathBagItem.DeathLoadoutIndex = Player.CurrentLoadoutIndex;
+            deathBagItem.SavedInventory = savedInventory;
+        }
+        bagItem.SetNameOverride($"{Player.name}'s {DB.GetBagKindName(kind)}");
+        return bagItem;
+    }
+
+    private Item? FindExistingOverflowBag(List<(int SlotIndex, Item Item)> preserved)
+    {
+        for (int i = 0; i < Player.inventory.Length; i++)
+        {
+            if (IsOverflowBagItem(Player.inventory[i]))
+                return Player.inventory[i];
+        }
+
+        foreach (var (_, item) in preserved)
+        {
+            if (IsOverflowBagItem(item))
+                return item;
+        }
+
+        return null;
+    }
+
+    private int CountPreservedBagItemsNeedingNewSlots(List<(int SlotIndex, Item Item)> preserved)
+    {
+        int count = 0;
+        foreach (var (slotIndex, item) in preserved)
+        {
+            if (item.ModItem is not Items.DeathBagItem)
+                continue;
+            if (slotIndex < 0 || slotIndex >= Player.inventory.Length)
+            {
+                count++;
+                continue;
+            }
+            if (Player.inventory[slotIndex] is not null && !Player.inventory[slotIndex].IsAir)
+                count++;
+        }
+        return count;
+    }
+
+    private void RestoreDisplacedMainInventoryItems(List<(int SlotIndex, Item Item)> displacedItems)
+    {
+        foreach (var (slotIndex, displacedItem) in displacedItems)
+            Player.inventory[slotIndex] = displacedItem.Clone();
+    }
+
+    private bool TryFreeSlotsForLoadoutBag(List<(int SlotIndex, Item Item)> preserved)
+    {
+        Item? existingOverflowBag = FindExistingOverflowBag(preserved);
+        int preservedBagSlotsNeeded = CountPreservedBagItemsNeedingNewSlots(preserved);
+        int neededFreedSlots = 1 + preservedBagSlotsNeeded;
+        if (existingOverflowBag is null)
+            neededFreedSlots++;
+        var displacedItems = new List<(int SlotIndex, Item Item)>();
+
+        for (int slot = Player.inventory.Length - 1; slot >= 0 && displacedItems.Count < neededFreedSlots; slot--)
+        {
+            Item candidate = Player.inventory[slot];
+            if (candidate is null || candidate.IsAir || candidate.favorited)
+                continue;
+
+            displacedItems.Add((slot, candidate.Clone()));
+            Player.inventory[slot] = new Item();
+        }
+
+        if (displacedItems.Count < neededFreedSlots)
+        {
+            RestoreDisplacedMainInventoryItems(displacedItems);
+            Mod.Logger.Info("[DeathBag] Could not free enough non-favorited main inventory slots to keep loadout bag in inventory");
+            return false;
+        }
+
+        if (existingOverflowBag is not null)
+        {
+            AppendItemsToBag(existingOverflowBag, displacedItems);
+            Mod.Logger.Info($"[DeathBag] Appended {displacedItems.Count} displaced item(s) into existing overflow bag");
+            return true;
+        }
+
+        Item overflowBagItem = CreateBagItem(BagKind.Overflow, displacedItems);
+        Item overflowRemainder = Player.GetItem(Player.whoAmI, overflowBagItem, GetItemSettings.NPCEntityToPlayerInventorySettings);
+        if (overflowRemainder is null || overflowRemainder.IsAir)
+        {
+            Mod.Logger.Info($"[DeathBag] Created overflow bag with {displacedItems.Count} displaced item(s)");
+            return true;
+        }
+
+        Mod.Logger.Warn("[DeathBag] Failed to place overflow bag item after freeing slots; dropping displaced items instead");
+        foreach (var (_, displacedItem) in displacedItems)
+            Player.QuickSpawnItem(Player.GetSource_Misc("DeathBagOverflowFallback"), displacedItem, displacedItem.stack);
+
+        return true;
+    }
+
     public override bool PreKill(double damage, int hitDirection, bool pvp, ref bool playSound,
         ref bool genDust, ref PlayerDeathReason damageSource)
     {
@@ -266,15 +385,7 @@ public sealed class DeathBagPlayer : ModPlayer
         Item? loadoutBagItem = null;
         if (currentSnapshot.Count > 0)
         {
-            loadoutBagItem = new Item();
-            loadoutBagItem.SetDefaults(ModContent.ItemType<Items.DeathBagItem>());
-            if (loadoutBagItem.ModItem is Items.DeathBagItem bagItem)
-            {
-                bagItem.Kind = BagKind.Loadout;
-                bagItem.OwnerName = Player.name;
-                bagItem.SavedInventory = currentSnapshot;
-            }
-            loadoutBagItem.SetNameOverride($"{Player.name}'s Loadout");
+            loadoutBagItem = CreateBagItem(BagKind.Loadout, currentSnapshot);
             Mod.Logger.Info($"[DeathBag] Created loadout bag item with {currentSnapshot.Count} items");
         }
 
@@ -304,6 +415,19 @@ public sealed class DeathBagPlayer : ModPlayer
         // === 5. PLACE loadout bag item into inventory ===
         if (loadoutBagItem != null)
         {
+            bool needsOverflowHelp = true;
+            for (int i = 0; i < Player.inventory.Length; i++)
+            {
+                if (Player.inventory[i] is null || Player.inventory[i].IsAir)
+                {
+                    needsOverflowHelp = false;
+                    break;
+                }
+            }
+
+            if (needsOverflowHelp)
+                TryFreeSlotsForLoadoutBag(preserved);
+
             Item remainder = Player.GetItem(Player.whoAmI, loadoutBagItem, GetItemSettings.NPCEntityToPlayerInventorySettings);
             if (remainder is not null && !remainder.IsAir)
             {

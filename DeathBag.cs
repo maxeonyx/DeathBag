@@ -46,6 +46,26 @@ public sealed class DeathBag : Mod
         }
     }
 
+    internal static string GetBagKindName(BagKind kind)
+    {
+        return kind switch
+        {
+            BagKind.Loadout => "Loadout",
+            BagKind.Overflow => "Overflow",
+            _ => "Death Bag",
+        };
+    }
+
+    internal static string GetBagKindPromptLabel(BagKind kind)
+    {
+        return kind switch
+        {
+            BagKind.Loadout => "loadout",
+            BagKind.Overflow => "overflow",
+            _ => "bag",
+        };
+    }
+
     private void HandleBagCreated(BinaryReader reader, int whoAmI)
     {
         var kind = (BagKind)reader.ReadByte();
@@ -59,7 +79,7 @@ public sealed class DeathBag : Mod
         if (Main.netMode != NetmodeID.Server)
             return;
 
-        string kindName = kind == BagKind.Loadout ? "Loadout" : "Death Bag";
+        string kindName = GetBagKindName(kind);
         Logger.Info($"[DeathBag] Server: BagCreated ({kindName}) from {ownerName} with {inventory.Count} items at ({x:F0}, {y:F0}), loadout {deathLoadoutIndex}");
 
         int npcIndex = NPC.NewNPC(
@@ -139,7 +159,7 @@ public sealed class DeathBag : Mod
         WriteInventory(response, bagNPC.SavedInventory);
         response.Send(whoAmI); // to requesting client only
 
-        string kindName = bagNPC.Kind == BagKind.Loadout ? "Loadout" : "Death Bag";
+        string kindName = GetBagKindName(bagNPC.Kind);
         Logger.Info($"[DeathBag] Server: sent BagToItemResponse for {bagNPC.OwnerName}'s {kindName} to {carrierName} (player {whoAmI}), NPC kept alive pending confirmation");
     }
 
@@ -156,7 +176,7 @@ public sealed class DeathBag : Mod
             return;
 
         Player localPlayer = Main.LocalPlayer;
-        string kindName = kind == BagKind.Loadout ? "Loadout" : "Death Bag";
+        string kindName = GetBagKindName(kind);
 
         // Create the bag item in our own inventory (client-authoritative)
         var item = new Item();
@@ -255,7 +275,7 @@ public sealed class DeathBag : Mod
     internal static void LogBagContents(Mod mod, string reason, string ownerName, BagKind kind,
         List<(int SlotIndex, Item Item)> inventory)
     {
-        string kindName = kind == BagKind.Loadout ? "Loadout" : "Death Bag";
+        string kindName = GetBagKindName(kind);
         mod.Logger.Info($"[DeathBag] BAG CONSUMED ({reason}): {ownerName}'s {kindName}, {inventory.Count} items:");
 
         int logged = 0;

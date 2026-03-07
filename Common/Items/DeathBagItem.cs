@@ -246,7 +246,7 @@ public sealed class DeathBagItem : ModItem
             Mod.Logger.Info($"[DeathBag] Converted bag item back to NPC for {OwnerName} with {SavedInventory.Count} items, kind={Kind} (delivered by {CarrierName})");
 
             // Broadcast delivery message to all players
-            string deliveryKind = Kind == BagKind.Loadout ? "loadout" : "bag";
+            string deliveryKind = DB.GetBagKindPromptLabel(Kind);
             if (!string.IsNullOrEmpty(CarrierName) && Main.netMode == NetmodeID.Server)
             {
                 ChatHelper.BroadcastChatMessage(
@@ -304,7 +304,7 @@ public sealed class DeathBagItem : ModItem
         }
 
         // Restore display name (SetNameOverride doesn't persist through save/load)
-        string kindName = Kind == BagKind.Loadout ? "Loadout" : "Death Bag";
+        string kindName = DB.GetBagKindName(Kind);
         if (!string.IsNullOrEmpty(OwnerName))
             Item.SetNameOverride($"{OwnerName}'s {kindName}");
     }
@@ -327,7 +327,7 @@ public sealed class DeathBagItem : ModItem
         SavedInventory = DB.ReadInventory(reader);
 
         // Restore display name after net sync
-        string kindName = Kind == BagKind.Loadout ? "Loadout" : "Death Bag";
+        string kindName = DB.GetBagKindName(Kind);
         if (!string.IsNullOrEmpty(OwnerName))
             Item.SetNameOverride($"{OwnerName}'s {kindName}");
     }
