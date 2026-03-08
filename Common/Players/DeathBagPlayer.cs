@@ -447,14 +447,24 @@ public sealed class DeathBagPlayer : ModPlayer
         // Reinsert preserved items (bag items, copper tools) after restore so they can't be overwritten.
         ReinsertPreservedItemsIntoMainInventory(preserved);
 
-        // Defer NPC removal to next tick (removing mid-frame can crash)
-        _pendingBagRemoval = bag.NPC.whoAmI;
-
         // Log contents before clearing (disaster recovery)
         DB.LogBagContents(Mod, "owner restore", bag.OwnerName, bag.Kind, bag.SavedInventory);
 
-        // Mark bag as consumed immediately so AI() can't trigger a second restore
+        // Make the NPC immediately non-interactable on this client so no second interaction path
+        // can run while we wait for the server/client removal sync to arrive.
+        int restoredNpcIndex = bag.NPC.whoAmI;
+        bag.InteractionLocked = true;
         bag.SavedInventory.Clear();
+        bag.NPC.velocity = Vector2.Zero;
+
+        if (Main.netMode == NetmodeID.MultiplayerClient)
+        {
+            DB.SendBagRemoved(Mod, restoredNpcIndex);
+        }
+        else
+        {
+            bag.NPC.active = false;
+        }
 
         // === 6. SYNC all slots to server ===
         if (Main.netMode == NetmodeID.MultiplayerClient)

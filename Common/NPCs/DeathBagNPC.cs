@@ -65,6 +65,12 @@ public sealed class DeathBagNPC : ModNPC
     /// <summary>Whether the local player is hovering and in range — set in AI(), read in PostDraw.</summary>
     private bool _showActionHint;
 
+    /// <summary>
+    /// Client-local flag used to make a bag immediately non-interactable once restore/pickup succeeds,
+    /// before the actual NPC removal sync arrives.
+    /// </summary>
+    internal bool InteractionLocked;
+
     private bool IsLocalPlayerOwner(Player localPlayer)
     {
         if (!string.IsNullOrEmpty(OwnerName) && localPlayer?.active == true && localPlayer.name == OwnerName)
@@ -128,6 +134,13 @@ public sealed class DeathBagNPC : ModNPC
         // Keep GivenName in sync (vanilla uses it for hover text)
         UpdateGivenName();
 
+        if (InteractionLocked || SavedInventory.Count == 0)
+        {
+            _showActionHint = false;
+            NPC.velocity = Vector2.Zero;
+            return;
+        }
+
         // Client-side only: handle magnet pull for owner, owner right-click restore for loadout bags
         if (Main.netMode == NetmodeID.Server)
             return;
@@ -183,6 +196,9 @@ public sealed class DeathBagNPC : ModNPC
     // Right-click interaction: non-owners pick up, owner restores (loadout) or auto-picks-up (death)
     public override bool CanChat()
     {
+        if (InteractionLocked || SavedInventory.Count == 0)
+            return false;
+
         Player localPlayer = Main.LocalPlayer;
         bool isOwner = IsLocalPlayerOwner(localPlayer);
 
@@ -209,7 +225,7 @@ public sealed class DeathBagNPC : ModNPC
 
     public override void OnChatButtonClicked(bool firstButton, ref string shopName)
     {
-        if (!firstButton)
+        if (!firstButton || InteractionLocked || SavedInventory.Count == 0)
             return;
 
         Player localPlayer = Main.LocalPlayer;
