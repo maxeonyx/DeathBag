@@ -144,6 +144,13 @@ public sealed class DeathBag : Mod
             return;
         }
 
+        Player requester = whoAmI >= 0 && whoAmI < Main.maxPlayers ? Main.player[whoAmI] : null;
+        if (requester?.active == true && !string.IsNullOrEmpty(bagNPC.OwnerName) && requester.name == bagNPC.OwnerName)
+        {
+            Logger.Warn($"[DeathBag] Server: rejected BagToItem from owner {requester.name} for NPC {npcIndex}");
+            return;
+        }
+
         // Send bag data to the requesting client so it can place the item itself
         // (inventory is client-authoritative — server can't modify it)
         // NOTE: Do NOT remove the NPC here! The client will send BagRemoved

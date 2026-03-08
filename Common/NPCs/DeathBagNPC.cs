@@ -65,6 +65,14 @@ public sealed class DeathBagNPC : ModNPC
     /// <summary>Whether the local player is hovering and in range — set in AI(), read in PostDraw.</summary>
     private bool _showActionHint;
 
+    private bool IsLocalPlayerOwner(Player localPlayer)
+    {
+        if (!string.IsNullOrEmpty(OwnerName) && localPlayer?.active == true && localPlayer.name == OwnerName)
+            return true;
+
+        return OwnerPlayerIndex >= 0 && localPlayer?.whoAmI == OwnerPlayerIndex;
+    }
+
     // Item magnet constants (matches vanilla item pickup behavior)
     private const float MagnetRange = 224f;  // ~14 tiles — range at which bag starts pulling toward owner
     private const float PickupRange = 32f;   // contact range — triggers restore
@@ -125,7 +133,7 @@ public sealed class DeathBagNPC : ModNPC
             return;
 
         Player localPlayer = Main.LocalPlayer;
-        bool isOwner = OwnerPlayerIndex >= 0 && localPlayer.whoAmI == OwnerPlayerIndex;
+        bool isOwner = IsLocalPlayerOwner(localPlayer);
         float dist = Vector2.Distance(localPlayer.Center, NPC.Center);
 
         _showActionHint = false;
@@ -176,7 +184,7 @@ public sealed class DeathBagNPC : ModNPC
     public override bool CanChat()
     {
         Player localPlayer = Main.LocalPlayer;
-        bool isOwner = OwnerPlayerIndex >= 0 && localPlayer.whoAmI == OwnerPlayerIndex;
+        bool isOwner = IsLocalPlayerOwner(localPlayer);
 
         // Death bags: owner auto-picks up via magnet — no chat needed
         // Loadout bags: owner right-click restores instantly in AI() — no chat needed
@@ -204,8 +212,9 @@ public sealed class DeathBagNPC : ModNPC
         if (!firstButton)
             return;
 
-        // Only non-owners reach here (CanChat returns false for owner)
         Player localPlayer = Main.LocalPlayer;
+        if (IsLocalPlayerOwner(localPlayer))
+            return;
 
         // Non-owner: pick up as inventory item
         if (Main.netMode == NetmodeID.MultiplayerClient)
@@ -290,7 +299,7 @@ public sealed class DeathBagNPC : ModNPC
             return;
 
         Player localPlayer = Main.LocalPlayer;
-        bool isOwner = OwnerPlayerIndex >= 0 && localPlayer.whoAmI == OwnerPlayerIndex;
+        bool isOwner = IsLocalPlayerOwner(localPlayer);
 
         string hint;
         if (isOwner && Kind != BagKind.Death)
