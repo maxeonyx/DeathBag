@@ -177,10 +177,6 @@ Currently bags save everything. The plan is to eventually:
 1. Add lava death penalty: white-rarity (level 0) items are destroyed when dying in lava, matching vanilla Mediumcore behavior
 2. Add a "Lavaproof Bag" upgrade item that prevents this — tied into the lava tech tree (Lava Charm, Obsidian Skull, Lava Waders, etc.)
 
-### DefaultTools (separate mod idea)
-
-Instead of spawning with copper tool items, tool slots have a special background showing the copper tool. The slot behaves as a copper tool when empty — it's a default, not an item. Partially redundant with Death Bag but still useful for secondary loadout management.
-
 ### Left-Click Bag Placement
 
 Currently dropping a bag item places it at the player's feet. Left-clicking with a bag on the cursor should place it at the cursor's world position (like placing a tile/block), giving precise control over where the bag NPC spawns.
