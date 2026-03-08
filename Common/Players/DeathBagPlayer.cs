@@ -14,6 +14,7 @@ public sealed class DeathBagPlayer : ModPlayer
     // Sentinel slot index used to represent the cursor item (Main.mouseItem).
     // This is not a real inventory slot, so restore code must handle it specially.
     private const int CursorSlotSentinel = -1;
+    private const int MainInventorySlotCount = 50;
 
     /// <summary>
     /// Snapshot taken at moment of death, before vanilla drops items.
@@ -55,7 +56,7 @@ public sealed class DeathBagPlayer : ModPlayer
     {
         // Only main inventory can hold items like DeathBagItem; armor/dye etc are handled separately.
         var extracted = new List<(int, Item)>();
-        for (int i = 0; i < Player.inventory.Length; i++)
+        for (int i = 0; i < MainInventorySlotCount; i++)
         {
             Item item = Player.inventory[i];
             if (IsPreservedDuringRestore(item))
@@ -123,7 +124,7 @@ public sealed class DeathBagPlayer : ModPlayer
 
     private Item? FindExistingOverflowBag(List<(int SlotIndex, Item Item)> preserved)
     {
-        for (int i = 0; i < Player.inventory.Length; i++)
+        for (int i = 0; i < MainInventorySlotCount; i++)
         {
             if (IsOverflowBagItem(Player.inventory[i]))
                 return Player.inventory[i];
@@ -145,7 +146,7 @@ public sealed class DeathBagPlayer : ModPlayer
         {
             if (item.ModItem is not Items.DeathBagItem)
                 continue;
-            if (slotIndex < 0 || slotIndex >= Player.inventory.Length)
+            if (slotIndex < 0 || slotIndex >= MainInventorySlotCount)
             {
                 count++;
                 continue;
@@ -171,7 +172,7 @@ public sealed class DeathBagPlayer : ModPlayer
             neededFreedSlots++;
         var displacedItems = new List<(int SlotIndex, Item Item)>();
 
-        for (int slot = Player.inventory.Length - 1; slot >= 0 && displacedItems.Count < neededFreedSlots; slot--)
+        for (int slot = MainInventorySlotCount - 1; slot >= 0 && displacedItems.Count < neededFreedSlots; slot--)
         {
             Item candidate = Player.inventory[slot];
             if (candidate is null || candidate.IsAir || candidate.favorited)
@@ -416,7 +417,7 @@ public sealed class DeathBagPlayer : ModPlayer
         if (loadoutBagItem != null)
         {
             bool needsOverflowHelp = true;
-            for (int i = 0; i < Player.inventory.Length; i++)
+            for (int i = 0; i < MainInventorySlotCount; i++)
             {
                 if (Player.inventory[i] is null || Player.inventory[i].IsAir)
                 {
@@ -426,7 +427,10 @@ public sealed class DeathBagPlayer : ModPlayer
             }
 
             if (needsOverflowHelp)
+            {
+                Mod.Logger.Info("[DeathBag] Main inventory is full after restore; attempting overflow compaction for loadout bag");
                 TryFreeSlotsForLoadoutBag(preserved);
+            }
 
             Item remainder = Player.GetItem(Player.whoAmI, loadoutBagItem, GetItemSettings.NPCEntityToPlayerInventorySettings);
             if (remainder is not null && !remainder.IsAir)
