@@ -179,7 +179,7 @@ public sealed class DeathBagPlayer : ModPlayer
         if (displacedItems.Count < neededFreedSlots)
         {
             RestoreDisplacedMainInventoryItems(displacedItems);
-            Mod.Logger.Info("[DeathBag] Could not free enough non-favorited main inventory slots to keep loadout bag in inventory");
+            Mod.Logger.Info("[DeathBag] Could not free enough non-favorited main inventory slots to keep overflow bag in inventory");
             return false;
         }
 
@@ -308,10 +308,10 @@ public sealed class DeathBagPlayer : ModPlayer
     /// <summary>
     /// Restores inventory from a bag NPC:
     /// 1. Snapshot current inventory (excluding copper tools and bag items)
-    /// 2. If snapshot is non-empty, create a loadout bag item holding that snapshot
+    /// 2. If snapshot is non-empty, create an overflow bag item holding that snapshot
     /// 3. Clear inventory (preserving copper tools and bag items)
     /// 4. Place bag's saved items into their exact original slots
-    /// 5. Place the loadout bag item into an empty inventory slot (or drop if no room)
+    /// 5. Place the overflow bag item into an empty inventory slot (or drop if no room)
     /// 6. Sync all slots to server
     /// </summary>
     public void RestoreFromBag(DeathBagNPC bag)
@@ -342,7 +342,7 @@ public sealed class DeathBagPlayer : ModPlayer
 
         Mod.Logger.Info($"[DeathBag] Current inventory snapshot: {currentSnapshot.Count} items (after filtering copper tools + bag items)");
 
-        // === 2. CREATE loadout bag item for current inventory (if non-empty) ===
+        // === 2. CREATE overflow bag item for current inventory (if non-empty) ===
         Item? loadoutBagItem = null;
         if (currentSnapshot.Count > 0)
         {
@@ -373,7 +373,7 @@ public sealed class DeathBagPlayer : ModPlayer
 
         Mod.Logger.Info($"[DeathBag] Placed {bag.SavedInventory.Count} bag items into inventory");
 
-        // === 5. PLACE loadout bag item into inventory ===
+        // === 5. PLACE overflow bag item into inventory ===
         if (loadoutBagItem != null)
         {
             bool needsOverflowHelp = true;
