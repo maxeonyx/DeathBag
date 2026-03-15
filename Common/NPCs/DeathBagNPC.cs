@@ -59,9 +59,6 @@ public sealed class DeathBagNPC : ModNPC
     /// <summary>Separate texture for loadout bags (loaded in SetStaticDefaults).</summary>
     private static Asset<Texture2D> _loadoutTexture;
 
-    /// <summary>Visual-only bob offset (pixels). Applied in draw, not to NPC.position.</summary>
-    private float _bobOffset;
-
     /// <summary>Whether the local player is hovering and in range — set in AI(), read in PostDraw.</summary>
     private bool _showActionHint;
 
@@ -121,8 +118,7 @@ public sealed class DeathBagNPC : ModNPC
     {
         // Visual-only bob — each bag gets a unique phase offset so they don't bob in sync
         // DrawOffsetY = 0 centers sprite on hitbox center (used by our custom PreDraw)
-        _bobOffset = (float)Math.Sin(Main.GameUpdateCount * 0.04f + NPC.whoAmI * 1.7f) * 1.5f;
-        DrawOffsetY = _bobOffset;
+        DrawOffsetY = (float)Math.Sin(Main.GameUpdateCount * 0.04f + NPC.whoAmI * 1.7f) * 1.5f;
 
         // Apply friction so bags settle after push-apart, but don't drift forever
         NPC.velocity *= 0.9f;
@@ -248,7 +244,7 @@ public sealed class DeathBagNPC : ModNPC
                 bagItem.Kind = Kind;
                 bagItem.OwnerName = OwnerName;
                 bagItem.DeathLoadoutIndex = DeathLoadoutIndex;
-                bagItem.SavedInventory = SavedInventory;
+                bagItem.SavedInventory = DB.CloneInventory(SavedInventory);
                 bagItem.CarrierName = localPlayer.name;
             }
             item.SetNameOverride($"{OwnerName}'s {kindName}");

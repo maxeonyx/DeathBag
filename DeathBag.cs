@@ -66,6 +66,101 @@ public sealed class DeathBag : Mod
         };
     }
 
+    internal static List<(int SlotIndex, Item Item)> CloneInventory(List<(int SlotIndex, Item Item)> inventory)
+    {
+        var clone = new List<(int SlotIndex, Item Item)>(inventory.Count);
+        foreach (var (slotIndex, item) in inventory)
+            clone.Add((slotIndex, item.Clone()));
+        return clone;
+    }
+
+    internal static int FindMatchingBagItemSlot(Player player, string ownerName, BagKind kind, int deathLoadoutIndex,
+        string carrierName, List<(int SlotIndex, Item Item)> inventory)
+    {
+        return FindMatchingBagItemSlot(player, ownerName, kind, deathLoadoutIndex, carrierName, inventory, excludedSlot: -1);
+    }
+
+    internal static int FindNewMatchingBagItemSlot(Player player, string ownerName, BagKind kind, int deathLoadoutIndex,
+        string carrierName, List<(int SlotIndex, Item Item)> inventory, HashSet<int> previouslyMatchingSlots)
+    {
+        for (int i = 0; i < 50; i++)
+        {
+            if (previouslyMatchingSlots.Contains(i))
+                continue;
+            if (!IsMatchingBagItem(player.inventory[i], ownerName, kind, deathLoadoutIndex, carrierName, inventory))
+                continue;
+
+            return i;
+        }
+
+        return -1;
+    }
+
+    internal static HashSet<int> FindMatchingBagItemSlots(Player player, string ownerName, BagKind kind, int deathLoadoutIndex,
+        string carrierName, List<(int SlotIndex, Item Item)> inventory)
+    {
+        var slots = new HashSet<int>();
+        for (int i = 0; i < 50; i++)
+        {
+            if (IsMatchingBagItem(player.inventory[i], ownerName, kind, deathLoadoutIndex, carrierName, inventory))
+                slots.Add(i);
+        }
+
+        return slots;
+    }
+
+    private static int FindMatchingBagItemSlot(Player player, string ownerName, BagKind kind, int deathLoadoutIndex,
+        string carrierName, List<(int SlotIndex, Item Item)> inventory, int excludedSlot)
+    {
+        for (int i = 0; i < 50; i++)
+        {
+            if (i == excludedSlot)
+                continue;
+            if (!IsMatchingBagItem(player.inventory[i], ownerName, kind, deathLoadoutIndex, carrierName, inventory))
+                continue;
+
+            return i;
+        }
+
+        return -1;
+    }
+
+    private static bool IsMatchingBagItem(Item item, string ownerName, BagKind kind, int deathLoadoutIndex,
+        string carrierName, List<(int SlotIndex, Item Item)> inventory)
+    {
+        if (item?.ModItem is not DeathBagItem bagItem)
+            return false;
+
+        if (bagItem.OwnerName != ownerName || bagItem.Kind != kind || bagItem.DeathLoadoutIndex != deathLoadoutIndex)
+            return false;
+        if (bagItem.CarrierName != carrierName)
+            return false;
+        if (!InventoryContentsMatch(bagItem.SavedInventory, inventory))
+            return false;
+
+        return true;
+    }
+
+    private static bool InventoryContentsMatch(List<(int SlotIndex, Item Item)> left, List<(int SlotIndex, Item Item)> right)
+    {
+        if (left.Count != right.Count)
+            return false;
+
+        for (int i = 0; i < left.Count; i++)
+        {
+            var (leftSlotIndex, leftItem) = left[i];
+            var (rightSlotIndex, rightItem) = right[i];
+            if (leftSlotIndex != rightSlotIndex)
+                return false;
+            if (leftItem.type != rightItem.type || leftItem.stack != rightItem.stack)
+                return false;
+            if (leftItem.prefix != rightItem.prefix || leftItem.favorited != rightItem.favorited)
+                return false;
+        }
+
+        return true;
+    }
+
     private void HandleBagCreated(BinaryReader reader, int whoAmI)
     {
         var kind = (BagKind)reader.ReadByte();
@@ -101,7 +196,7 @@ public sealed class DeathBag : Mod
             bagNPC.OwnerName = ownerName;
             bagNPC.OwnerPlayerIndex = ownerIndex;
             bagNPC.DeathLoadoutIndex = deathLoadoutIndex;
-            bagNPC.SavedInventory = inventory;
+            bagNPC.SavedInventory = CloneInventory(inventory);
 
             // netAlways + netUpdate ensures vanilla syncs this NPC (with SendExtraAI data) to all clients
             npc.netUpdate = true;
@@ -184,6 +279,7 @@ public sealed class DeathBag : Mod
 
         Player localPlayer = Main.LocalPlayer;
         string kindName = GetBagKindName(kind);
+        HashSet<int> previouslyMatchingSlots = FindMatchingBagItemSlots(localPlayer, ownerName, kind, deathLoadoutIndex, carrierName, inventory);
 
         // Create the bag item in our own inventory (client-authoritative)
         var item = new Item();
@@ -193,7 +289,7 @@ public sealed class DeathBag : Mod
             bagItem.Kind = kind;
             bagItem.OwnerName = ownerName;
             bagItem.DeathLoadoutIndex = deathLoadoutIndex;
-            bagItem.SavedInventory = inventory;
+            bagItem.SavedInventory = CloneInventory(inventory);
             bagItem.CarrierName = carrierName;
         }
         item.SetNameOverride($"{ownerName}'s {kindName}");
@@ -213,17 +309,7 @@ public sealed class DeathBag : Mod
         LogBagContents(this, "non-owner pickup (MP client)", ownerName, kind, inventory);
 
         // Item placed successfully — sync the slot to server. Find which slot GetItem placed it in.
-        int placedSlot = -1;
-        for (int i = 0; i < 50; i++)
-        {
-            if (localPlayer.inventory[i]?.ModItem is DeathBagItem placed
-                && placed.OwnerName == ownerName && placed.Kind == kind
-                && placed.SavedInventory == inventory)
-            {
-                placedSlot = i;
-                break;
-            }
-        }
+        int placedSlot = FindNewMatchingBagItemSlot(localPlayer, ownerName, kind, deathLoadoutIndex, carrierName, inventory, previouslyMatchingSlots);
         if (placedSlot >= 0)
             NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, localPlayer.whoAmI, placedSlot);
 

@@ -6,6 +6,7 @@ using Terraria.ModLoader.IO;
 using Terraria.UI;
 using DeathBag.Common.Items;
 using DeathBag.Common.NPCs;
+using DB = DeathBag.DeathBag;
 
 namespace DeathBag.Common.Systems;
 
@@ -176,7 +177,7 @@ public sealed class DeathBagState : ModSystem
             bagNPC.Kind = data.Kind;
             bagNPC.OwnerName = data.OwnerName;
             bagNPC.OwnerPlayerIndex = ResolvePlayerIndex(data.OwnerName);
-            bagNPC.SavedInventory = data.Inventory;
+            bagNPC.SavedInventory = DB.CloneInventory(data.Inventory);
             bagNPC.DeathLoadoutIndex = data.DeathLoadoutIndex;
             npc.netUpdate = true;
 
@@ -198,8 +199,4 @@ public sealed class DeathBagState : ModSystem
         return -1;
     }
 
-    public override void OnWorldLoad()
-    {
-        // Clean state on world load (LoadWorldData re-populates)
-    }
 }

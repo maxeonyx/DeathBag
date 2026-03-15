@@ -6,9 +6,11 @@ using Terraria.Localization;
 using Terraria.ModLoader;
 using Terraria.ObjectData;
 using Terraria.GameContent.ObjectInteractions;
+using DeathBag.Common;
 using DeathBag.Common.Items;
 using DeathBag.Common.NPCs;
 using DeathBag.Common.Players;
+using DB = DeathBag.DeathBag;
 
 namespace DeathBag.Common.Tiles;
 
@@ -80,6 +82,7 @@ public sealed class LoadoutStationTile : ModTile
         }
 
         int loadoutIndex = player.CurrentLoadoutIndex;
+        var existingMatchingSlots = DB.FindMatchingBagItemSlots(player, player.name, BagKind.Loadout, loadoutIndex, player.name, snapshot);
 
         // Clear the snapshotted items from inventory (keep bag items)
         ClearSnapshotFromInventory(player, snapshot);
@@ -92,7 +95,7 @@ public sealed class LoadoutStationTile : ModTile
             bagItem.Kind = BagKind.Loadout;
             bagItem.OwnerName = player.name;
             bagItem.DeathLoadoutIndex = loadoutIndex;
-            bagItem.SavedInventory = snapshot;
+            bagItem.SavedInventory = DB.CloneInventory(snapshot);
             bagItem.CarrierName = player.name;
         }
         item.SetNameOverride($"{player.name}'s Loadout");
@@ -108,15 +111,9 @@ public sealed class LoadoutStationTile : ModTile
         // Sync the new item slot to server
         if (Main.netMode == NetmodeID.MultiplayerClient)
         {
-            for (int s = 0; s < 50; s++)
-            {
-                if (player.inventory[s]?.ModItem is DeathBagItem placed
-                    && placed.OwnerName == player.name && placed.SavedInventory == snapshot)
-                {
-                    NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, player.whoAmI, s);
-                    break;
-                }
-            }
+            int placedSlot = DB.FindNewMatchingBagItemSlot(player, player.name, BagKind.Loadout, loadoutIndex, player.name, snapshot, existingMatchingSlots);
+            if (placedSlot >= 0)
+                NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, player.whoAmI, placedSlot);
         }
 
         Main.NewText($"Created loadout bag with {snapshot.Count} items.", new Color(140, 180, 255));
@@ -136,42 +133,13 @@ public sealed class LoadoutStationTile : ModTile
         foreach (var (slotIndex, _) in snapshot)
             slotsToClear.Add(slotIndex);
 
-        // Slot constants match DeathBagPlayer
-        const int slotArmor = 59;
-        const int slotDye = 79;
-        const int slotMiscEquips = 89;
-        const int slotMiscDyes = 94;
-        const int slotLoadoutsStart = 99;
-        const int loadoutSize = 30;
-
-        void ClearArray(Item[] array, int baseSlot)
-        {
-            for (int i = 0; i < array.Length; i++)
-            {
-                if (slotsToClear.Contains(baseSlot + i))
-                    array[i] = new Item();
-            }
-        }
-
-        ClearArray(player.inventory, 0);
-        ClearArray(player.armor, slotArmor);
-        ClearArray(player.dye, slotDye);
-        ClearArray(player.miscEquips, slotMiscEquips);
-        ClearArray(player.miscDyes, slotMiscDyes);
-
-        for (int l = 0; l < player.Loadouts.Length; l++)
-        {
-            if (l == player.CurrentLoadoutIndex)
-                continue;
-            int loadoutBase = slotLoadoutsStart + l * loadoutSize;
-            ClearArray(player.Loadouts[l].Armor, loadoutBase);
-            ClearArray(player.Loadouts[l].Dye, loadoutBase + 20);
-        }
+        foreach (int slotIndex in slotsToClear)
+            SlotHelper.TryClearSlot(player, slotIndex);
 
         // Sync cleared slots to server
         if (Main.netMode == NetmodeID.MultiplayerClient)
         {
-            int maxSlot = slotLoadoutsStart + player.Loadouts.Length * loadoutSize;
+            int maxSlot = SlotHelper.GetMaxSyncEquipmentSlot(player);
             for (int i = 0; i < maxSlot; i++)
             {
                 if (slotsToClear.Contains(i))

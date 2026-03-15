@@ -9,6 +9,7 @@ using Terraria.ID;
 using Terraria.Localization;
 using Terraria.ModLoader;
 using Terraria.ModLoader.IO;
+using DeathBag.Common;
 using DeathBag.Common.NPCs;
 using DeathBag.Common.Players;
 using DB = DeathBag.DeathBag;
@@ -178,7 +179,7 @@ public sealed class DeathBagItem : ModItem
         // Sync slot state to server (armor/accessories/loadouts aren't covered by vanilla item pickup sync).
         if (Main.netMode == NetmodeID.MultiplayerClient)
         {
-            int maxSlot = 99 + player.Loadouts.Length * 30;
+            int maxSlot = SlotHelper.GetMaxSyncEquipmentSlot(player);
             for (int slot = 0; slot < maxSlot; slot++)
                 NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, player.whoAmI, slot);
         }
@@ -239,7 +240,7 @@ public sealed class DeathBagItem : ModItem
             bagNPC.Kind = Kind;
             bagNPC.OwnerName = OwnerName;
             bagNPC.DeathLoadoutIndex = DeathLoadoutIndex;
-            bagNPC.SavedInventory = SavedInventory;
+            bagNPC.SavedInventory = DB.CloneInventory(SavedInventory);
             bagNPC.DeliveredBy = CarrierName;
             bagNPC.ResolveOwnerIndex();
             npc.netUpdate = true;

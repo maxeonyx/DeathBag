@@ -5,6 +5,7 @@ using Terraria.DataStructures;
 using Terraria.ID;
 using Terraria.ModLoader;
 using DB = DeathBag.DeathBag;
+using DeathBag.Common;
 using DeathBag.Common.NPCs;
 
 namespace DeathBag.Common.Players;
@@ -14,7 +15,6 @@ public sealed class DeathBagPlayer : ModPlayer
     // Sentinel slot index used to represent the cursor item (Main.mouseItem).
     // This is not a real inventory slot, so restore code must handle it specially.
     private const int CursorSlotSentinel = -1;
-    private const int MainInventorySlotCount = 50;
 
     /// <summary>
     /// Snapshot taken at moment of death, before vanilla drops items.
@@ -26,12 +26,6 @@ public sealed class DeathBagPlayer : ModPlayer
     /// Which loadout was active at time of death. Used to restore the correct loadout.
     /// </summary>
     private int _deathLoadoutIndex;
-
-    /// <summary>
-    /// NPC index to remove next tick (deferred to avoid crashing chat UI).
-    /// -1 means nothing pending.
-    /// </summary>
-    private int _pendingBagRemoval = -1;
 
     /// <summary>Copper starter tools — never worth bagging.</summary>
     private static readonly HashSet<int> CopperTools = new()
@@ -56,7 +50,7 @@ public sealed class DeathBagPlayer : ModPlayer
     {
         // Only main inventory can hold items like DeathBagItem; armor/dye etc are handled separately.
         var extracted = new List<(int, Item)>();
-        for (int i = 0; i < MainInventorySlotCount; i++)
+        for (int i = 0; i < SlotHelper.MainInventorySlotCount; i++)
         {
             Item item = Player.inventory[i];
             if (IsPreservedDuringRestore(item))
@@ -116,7 +110,7 @@ public sealed class DeathBagPlayer : ModPlayer
             deathBagItem.Kind = kind;
             deathBagItem.OwnerName = Player.name;
             deathBagItem.DeathLoadoutIndex = Player.CurrentLoadoutIndex;
-            deathBagItem.SavedInventory = savedInventory;
+            deathBagItem.SavedInventory = DB.CloneInventory(savedInventory);
         }
         bagItem.SetNameOverride($"{Player.name}'s {DB.GetBagKindName(kind)}");
         return bagItem;
@@ -124,7 +118,7 @@ public sealed class DeathBagPlayer : ModPlayer
 
     private Item? FindExistingOverflowBag(List<(int SlotIndex, Item Item)> preserved)
     {
-        for (int i = 0; i < MainInventorySlotCount; i++)
+        for (int i = 0; i < SlotHelper.MainInventorySlotCount; i++)
         {
             if (IsOverflowBagItem(Player.inventory[i]))
                 return Player.inventory[i];
@@ -146,7 +140,7 @@ public sealed class DeathBagPlayer : ModPlayer
         {
             if (item.ModItem is not Items.DeathBagItem)
                 continue;
-            if (slotIndex < 0 || slotIndex >= MainInventorySlotCount)
+            if (slotIndex < 0 || slotIndex >= SlotHelper.MainInventorySlotCount)
             {
                 count++;
                 continue;
@@ -172,7 +166,7 @@ public sealed class DeathBagPlayer : ModPlayer
             neededFreedSlots++;
         var displacedItems = new List<(int SlotIndex, Item Item)>();
 
-        for (int slot = MainInventorySlotCount - 1; slot >= 0 && displacedItems.Count < neededFreedSlots; slot--)
+        for (int slot = SlotHelper.MainInventorySlotCount - 1; slot >= 0 && displacedItems.Count < neededFreedSlots; slot--)
         {
             Item candidate = Player.inventory[slot];
             if (candidate is null || candidate.IsAir || candidate.favorited)
@@ -311,40 +305,6 @@ public sealed class DeathBagPlayer : ModPlayer
         }
     }
 
-    public override void PostUpdate()
-    {
-        if (Player.whoAmI != Main.myPlayer)
-            return;
-
-        // Deferred bag removal — can't deactivate NPC during chat click handler
-        // because GUIChatDrawInner still references it that frame.
-        if (_pendingBagRemoval >= 0)
-        {
-            int npcIndex = _pendingBagRemoval;
-            _pendingBagRemoval = -1;
-
-            if (npcIndex < Main.maxNPCs && Main.npc[npcIndex].active)
-            {
-                Mod.Logger.Info($"[DeathBag] Removing bag NPC (index {npcIndex}) on deferred tick");
-
-                // Log if NPC still has inventory data (it shouldn't — RestoreFromBag clears it)
-                if (Main.npc[npcIndex].ModNPC is DeathBagNPC bagNPC && bagNPC.SavedInventory.Count > 0)
-                    Mod.Logger.Warn($"[DeathBag] WARNING: bag NPC {npcIndex} still has {bagNPC.SavedInventory.Count} items at removal time!");
-
-                if (Main.netMode == NetmodeID.MultiplayerClient)
-                {
-                    // Tell server to remove the NPC
-                    DB.SendBagRemoved(Mod, npcIndex);
-                }
-                else
-                {
-                    // Singleplayer: remove directly
-                    Main.npc[npcIndex].active = false;
-                }
-            }
-        }
-    }
-
     /// <summary>
     /// Restores inventory from a bag NPC:
     /// 1. Snapshot current inventory (excluding copper tools and bag items)
@@ -386,8 +346,8 @@ public sealed class DeathBagPlayer : ModPlayer
         Item? loadoutBagItem = null;
         if (currentSnapshot.Count > 0)
         {
-            loadoutBagItem = CreateBagItem(BagKind.Loadout, currentSnapshot);
-            Mod.Logger.Info($"[DeathBag] Created loadout bag item with {currentSnapshot.Count} items");
+            loadoutBagItem = CreateBagItem(BagKind.Overflow, currentSnapshot);
+            Mod.Logger.Info($"[DeathBag] Created overflow bag item with {currentSnapshot.Count} items");
         }
 
         // === 3. CLEAR inventory (preserving copper tools + bag items) ===
@@ -417,7 +377,7 @@ public sealed class DeathBagPlayer : ModPlayer
         if (loadoutBagItem != null)
         {
             bool needsOverflowHelp = true;
-            for (int i = 0; i < MainInventorySlotCount; i++)
+            for (int i = 0; i < SlotHelper.MainInventorySlotCount; i++)
             {
                 if (Player.inventory[i] is null || Player.inventory[i].IsAir)
                 {
@@ -428,7 +388,7 @@ public sealed class DeathBagPlayer : ModPlayer
 
             if (needsOverflowHelp)
             {
-                Mod.Logger.Info("[DeathBag] Main inventory is full after restore; attempting overflow compaction for loadout bag");
+                Mod.Logger.Info("[DeathBag] Main inventory is full after restore; attempting overflow compaction for overflow bag");
                 TryFreeSlotsForLoadoutBag(preserved);
             }
 
@@ -436,11 +396,11 @@ public sealed class DeathBagPlayer : ModPlayer
             if (remainder is not null && !remainder.IsAir)
             {
                 Player.QuickSpawnItem(Player.GetSource_Misc("DeathBagLoadout"), remainder, remainder.stack);
-                Mod.Logger.Info("[DeathBag] No room for loadout bag item — dropped on ground");
+                Mod.Logger.Info("[DeathBag] No room for overflow bag item — dropped on ground");
             }
             else
             {
-                Mod.Logger.Info("[DeathBag] Placed loadout bag item in inventory");
+                Mod.Logger.Info("[DeathBag] Placed overflow bag item in inventory");
             }
         }
 
@@ -471,7 +431,7 @@ public sealed class DeathBagPlayer : ModPlayer
         {
             // Sync every slot in the full range — the clear step emptied slots
             // the server still thinks are occupied, so we must sync everything.
-            int maxSlot = SlotLoadoutsStart + Player.Loadouts.Length * LoadoutSize;
+            int maxSlot = SlotHelper.GetMaxSyncEquipmentSlot(Player);
             for (int slot = 0; slot < maxSlot; slot++)
                 NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, Player.whoAmI, slot);
         }
@@ -482,47 +442,9 @@ public sealed class DeathBagPlayer : ModPlayer
         Mod.Logger.Info("[DeathBag] Restore complete");
     }
 
-    /// <summary>
-    /// Sets the item at a given slot index (using the SyncEquipment slot convention).
-    /// </summary>
     private void SetSlotByIndex(int slot, Item item)
     {
-        if (slot < 59)
-        {
-            Player.inventory[slot] = item;
-        }
-        else if (slot < SlotDye)
-        {
-            Player.armor[slot - SlotArmor] = item;
-        }
-        else if (slot < SlotMiscEquips)
-        {
-            Player.dye[slot - SlotDye] = item;
-        }
-        else if (slot < SlotMiscDyes)
-        {
-            Player.miscEquips[slot - SlotMiscEquips] = item;
-        }
-        else if (slot < SlotLoadoutsStart)
-        {
-            Player.miscDyes[slot - SlotMiscDyes] = item;
-        }
-        else
-        {
-            // Loadout slots: figure out which loadout and whether it's armor or dye
-            int loadoutOffset = slot - SlotLoadoutsStart;
-            int loadoutIndex = loadoutOffset / LoadoutSize;
-            int withinLoadout = loadoutOffset % LoadoutSize;
-
-            if (loadoutIndex >= 0 && loadoutIndex < Player.Loadouts.Length
-                && loadoutIndex != Player.CurrentLoadoutIndex)
-            {
-                if (withinLoadout < 20)
-                    Player.Loadouts[loadoutIndex].Armor[withinLoadout] = item;
-                else
-                    Player.Loadouts[loadoutIndex].Dye[withinLoadout - 20] = item;
-            }
-        }
+        SlotHelper.TrySetSlot(Player, slot, item);
     }
 
     /// <summary>
@@ -531,125 +453,8 @@ public sealed class DeathBagPlayer : ModPlayer
     /// </summary>
     internal bool TryPlaceInSlotIfEmpty(int slot, Item item)
     {
-        if (slot < 0)
-            return false;
-
-        if (slot < 59)
-        {
-            Item cur = Player.inventory[slot];
-            if (cur is null || cur.IsAir)
-            {
-                Player.inventory[slot] = item;
-                return true;
-            }
-            return false;
-        }
-
-        if (slot < SlotDye)
-        {
-            int idx = slot - SlotArmor;
-            if (idx < 0 || idx >= Player.armor.Length)
-                return false;
-            Item cur = Player.armor[idx];
-            if (cur is null || cur.IsAir)
-            {
-                Player.armor[idx] = item;
-                return true;
-            }
-            return false;
-        }
-
-        if (slot < SlotMiscEquips)
-        {
-            int idx = slot - SlotDye;
-            if (idx < 0 || idx >= Player.dye.Length)
-                return false;
-            Item cur = Player.dye[idx];
-            if (cur is null || cur.IsAir)
-            {
-                Player.dye[idx] = item;
-                return true;
-            }
-            return false;
-        }
-
-        if (slot < SlotMiscDyes)
-        {
-            int idx = slot - SlotMiscEquips;
-            if (idx < 0 || idx >= Player.miscEquips.Length)
-                return false;
-            Item cur = Player.miscEquips[idx];
-            if (cur is null || cur.IsAir)
-            {
-                Player.miscEquips[idx] = item;
-                return true;
-            }
-            return false;
-        }
-
-        if (slot < SlotLoadoutsStart)
-        {
-            int idx = slot - SlotMiscDyes;
-            if (idx < 0 || idx >= Player.miscDyes.Length)
-                return false;
-            Item cur = Player.miscDyes[idx];
-            if (cur is null || cur.IsAir)
-            {
-                Player.miscDyes[idx] = item;
-                return true;
-            }
-            return false;
-        }
-
-        // Loadout slots: only inactive loadouts are addressable (active loadout is in Player.armor/dye)
-        int loadoutOffset = slot - SlotLoadoutsStart;
-        int loadoutIndex = loadoutOffset / LoadoutSize;
-        int withinLoadout = loadoutOffset % LoadoutSize;
-
-        if (loadoutIndex < 0 || loadoutIndex >= Player.Loadouts.Length)
-            return false;
-        if (loadoutIndex == Player.CurrentLoadoutIndex)
-            return false;
-
-        if (withinLoadout < 20)
-        {
-            Item cur = Player.Loadouts[loadoutIndex].Armor[withinLoadout];
-            if (cur is null || cur.IsAir)
-            {
-                Player.Loadouts[loadoutIndex].Armor[withinLoadout] = item;
-                return true;
-            }
-            return false;
-        }
-
-        int dyeIdx = withinLoadout - 20;
-        if (dyeIdx < 0 || dyeIdx >= Player.Loadouts[loadoutIndex].Dye.Length)
-            return false;
-        Item curDye = Player.Loadouts[loadoutIndex].Dye[dyeIdx];
-        if (curDye is null || curDye.IsAir)
-        {
-            Player.Loadouts[loadoutIndex].Dye[dyeIdx] = item;
-            return true;
-        }
-        return false;
+        return SlotHelper.TryPlaceInSlotIfEmpty(Player, slot, item);
     }
-
-    /// <summary>
-    /// Slot index ranges matching SyncEquipment conventions:
-    ///   0-58:   Player.inventory
-    ///   59-78:  Player.armor (armor, accessories, vanity)
-    ///   79-88:  Player.dye
-    ///   89-93:  Player.miscEquips
-    ///   94-98:  Player.miscDyes
-    ///   99+:    Loadout slots (each loadout: 20 armor + 10 dye = 30 slots)
-    ///           Loadout 0 = 99-128, Loadout 1 = 129-158, Loadout 2 = 159-188
-    /// </summary>
-    private const int SlotArmor = 59;
-    private const int SlotDye = 79;
-    private const int SlotMiscEquips = 89;
-    private const int SlotMiscDyes = 94;
-    private const int SlotLoadoutsStart = 99;
-    private const int LoadoutSize = 30; // 20 armor + 10 dye per loadout
 
     internal List<(int SlotIndex, Item Item)> SnapshotInventory()
     {
@@ -670,10 +475,10 @@ public sealed class DeathBagPlayer : ModPlayer
 
         Mod.Logger.Info($"[DeathBag] Snapshot: CurrentLoadoutIndex={Player.CurrentLoadoutIndex}, Loadouts.Length={Player.Loadouts.Length}");
         Snap(Player.inventory, 0, "inventory");
-        Snap(Player.armor, SlotArmor, "armor");
-        Snap(Player.dye, SlotDye, "dye");
-        Snap(Player.miscEquips, SlotMiscEquips, "miscEquips");
-        Snap(Player.miscDyes, SlotMiscDyes, "miscDyes");
+        Snap(Player.armor, SlotHelper.SlotArmor, "armor");
+        Snap(Player.dye, SlotHelper.SlotDye, "dye");
+        Snap(Player.miscEquips, SlotHelper.SlotMiscEquips, "miscEquips");
+        Snap(Player.miscDyes, SlotHelper.SlotMiscDyes, "miscDyes");
 
         // Inactive loadouts (active loadout's items are already in Player.armor/dye)
         for (int l = 0; l < Player.Loadouts.Length; l++)
@@ -681,9 +486,9 @@ public sealed class DeathBagPlayer : ModPlayer
             if (l == Player.CurrentLoadoutIndex)
                 continue;
 
-            int loadoutBase = SlotLoadoutsStart + l * LoadoutSize;
+            int loadoutBase = SlotHelper.SlotLoadoutsStart + l * SlotHelper.LoadoutSize;
             Snap(Player.Loadouts[l].Armor, loadoutBase, $"loadout{l}.Armor");
-            Snap(Player.Loadouts[l].Dye, loadoutBase + 20, $"loadout{l}.Dye");
+            Snap(Player.Loadouts[l].Dye, loadoutBase + SlotHelper.LoadoutArmorSlotCount, $"loadout{l}.Dye");
         }
 
         return snapshot;
@@ -753,7 +558,7 @@ public sealed class DeathBagPlayer : ModPlayer
             bagNPC.OwnerPlayerIndex = -1; // Will be resolved by ResolveOwnerIndex
             bagNPC.OwnerName = ownerName;
             bagNPC.DeathLoadoutIndex = deathLoadoutIndex;
-            bagNPC.SavedInventory = inventory;
+            bagNPC.SavedInventory = DB.CloneInventory(inventory);
             npc.netUpdate = true;
             bagNPC.ResolveOwnerIndex();
             Mod.Logger.Info($"[DeathBag] Bag NPC spawned (index {npcIndex}) for {ownerName} with {inventory.Count} items, kind={kind}, loadout {deathLoadoutIndex}");
