@@ -231,7 +231,7 @@ public abstract class BagItemBase : ModItem
             return false;
         if (slot < 0 || slot >= SlotHelper.MainInventorySlotCount)
             return false;
-        if (!ReferenceEquals(player.inventory[slot], Item))
+        if (!ReferenceEquals(player.inventory[slot]?.ModItem, this))
             return false;
 
         DB.LogBagContents(Mod, "placed bag via left-click", OwnerName, Kind, SavedInventory);
@@ -264,17 +264,17 @@ public abstract class BagItemBase : ModItem
         int selectedSlot = player.selectedItem;
         if (selectedSlot >= 0 && selectedSlot < SlotHelper.MainInventorySlotCount)
         {
-            if (ReferenceEquals(player.inventory[selectedSlot], Item))
+            if (ReferenceEquals(player.inventory[selectedSlot]?.ModItem, this))
                 return selectedSlot;
         }
 
         for (int i = 0; i < SlotHelper.MainInventorySlotCount; i++)
         {
-            if (ReferenceEquals(player.inventory[i], Item))
+            if (ReferenceEquals(player.inventory[i]?.ModItem, this))
                 return i;
         }
 
-        return DB.FindMatchingBagItemSlot(player, OwnerName, Kind, DeathLoadoutIndex, CarrierName, SavedInventory);
+        return -1;
     }
 
     private bool SpawnBagNPCFromItem()
