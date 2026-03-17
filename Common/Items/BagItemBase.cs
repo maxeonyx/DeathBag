@@ -108,6 +108,14 @@ public abstract class BagItemBase : ModItem
         return SavedInventory.Count == 0 || _consumeAfterImmediatePlacement;
     }
 
+    public override bool CanPickup(Player player)
+    {
+        if (Kind == BagKind.Overflow && player.name != OwnerName)
+            return false;
+
+        return base.CanPickup(player);
+    }
+
     public override void Update(ref float gravity, ref float maxFallSpeed)
     {
         if (!CanPlaceInWorld || Main.netMode == NetmodeID.MultiplayerClient || SavedInventory.Count == 0)

@@ -6,6 +6,8 @@ namespace DeathBag.Common.Items;
 
 public sealed class PortableDeathBagItem : BagItemBase
 {
+    public override string Texture => "DeathBag/Common/Items/DeathBagItem";
+
     public override BagKind Kind => BagKind.Death;
 
     protected override bool CanPlaceInWorld => true;

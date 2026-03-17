@@ -293,6 +293,8 @@ public sealed class DeathBagPlayer : ModPlayer
         if (Player.whoAmI != Main.myPlayer)
             return;
 
+        ProtectOverflowBagsFromShiftActions();
+
         // Safety net: if a bag item ends up in the trash slot, drop it instead.
         // Runs at the start of the tick (before input processing) so there's no
         // window to interact with the bag while it's in the trash slot.
@@ -312,6 +314,18 @@ public sealed class DeathBagPlayer : ModPlayer
                 Player.trashItem.TurnToAir();
             }
         }
+    }
+
+    public override bool ShiftClickSlot(Item[] inventory, int context, int slot)
+    {
+        if (slot < 0 || slot >= inventory.Length)
+            return false;
+        if (inventory[slot]?.ModItem is not Items.OverflowBagItem overflowBag)
+            return false;
+
+        EjectOverflowBagToInventory(overflowBag.Item.Clone(), sourceSlot: slot);
+        inventory[slot].TurnToAir();
+        return true;
     }
 
     /// <summary>
@@ -455,6 +469,46 @@ public sealed class DeathBagPlayer : ModPlayer
     private void SetSlotByIndex(int slot, Item item)
     {
         SlotHelper.TrySetSlot(Player, slot, item);
+    }
+
+    private void ProtectOverflowBagsFromShiftActions()
+    {
+        if (Main.mouseItem?.ModItem is not Items.OverflowBagItem)
+            return;
+
+        int selectedSlot = Player.selectedItem;
+        if (selectedSlot < 0 || selectedSlot >= SlotHelper.MainInventorySlotCount)
+        {
+            EjectOverflowBagToInventory(Main.mouseItem.Clone());
+            Main.mouseItem.TurnToAir();
+            return;
+        }
+
+        if (Player.inventory[selectedSlot] is null || Player.inventory[selectedSlot].IsAir)
+        {
+            Player.inventory[selectedSlot] = Main.mouseItem.Clone();
+            Main.mouseItem.TurnToAir();
+            return;
+        }
+
+        EjectOverflowBagToInventory(Main.mouseItem.Clone());
+        Main.mouseItem.TurnToAir();
+    }
+
+    private void EjectOverflowBagToInventory(Item overflowBag, int sourceSlot = -1)
+    {
+        Item remainder = Player.GetItem(Player.whoAmI, overflowBag, GetItemSettings.InventoryEntityToPlayerInventorySettings);
+        if (remainder is not null && !remainder.IsAir)
+        {
+            if (sourceSlot >= 0 && sourceSlot < SlotHelper.MainInventorySlotCount
+                && (Player.inventory[sourceSlot] is null || Player.inventory[sourceSlot].IsAir))
+            {
+                Player.inventory[sourceSlot] = remainder;
+                return;
+            }
+
+            Player.QuickSpawnItem(Player.GetSource_Misc("DeathBagOverflowEject"), remainder, remainder.stack);
+        }
     }
 
     /// <summary>
