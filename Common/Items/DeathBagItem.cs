@@ -37,6 +37,11 @@ public sealed class DeathBagItem : ModItem
     /// <summary>Saved inventory snapshot carried by this bag.</summary>
     public List<(int SlotIndex, Item Item)> SavedInventory = new();
 
+    private static int _nextPlacementRequestId = 1;
+
+    private bool _consumeAfterImmediatePlacement = true;
+    private int _pendingPlacementRequestId;
+
     /// <summary>Separate texture for loadout bag items.</summary>
     private static Asset<Texture2D> _loadoutTexture;
 
@@ -117,23 +122,38 @@ public sealed class DeathBagItem : ModItem
         // Only usable if it has contents and cursor is within tile placement range
         if (SavedInventory.Count == 0)
             return false;
+        if (_pendingPlacementRequestId != 0)
+            return false;
 
         Vector2 mouseWorld = Main.MouseWorld;
         float dist = Vector2.Distance(player.Center, mouseWorld);
-        float maxRange = Player.tileRangeX * 16f;
+        float maxRange = player.tileRangeX * 16f;
         return dist <= maxRange;
     }
 
     public override bool? UseItem(Player player)
     {
-        if (Main.netMode == NetmodeID.Server)
-            return true;
-
         Vector2 mouseWorld = Main.MouseWorld;
 
         // NewNPC treats coordinates as bottom-center, so offset upward
         // by half the bag height (48/2 = 24) so the bag's center lands at the click.
         Vector2 spawnPos = new(mouseWorld.X, mouseWorld.Y + 24f);
+
+        if (Main.netMode == NetmodeID.MultiplayerClient)
+        {
+            int sourceSlot = FindCurrentInventorySlot(player);
+            if (sourceSlot < 0)
+            {
+                Mod.Logger.Error("[DeathBag] Refused multiplayer bag placement because the source inventory slot could not be identified");
+                Main.NewText("Could not safely place that bag right now.", Color.Yellow);
+                return false;
+            }
+
+            _pendingPlacementRequestId = _nextPlacementRequestId++;
+            _consumeAfterImmediatePlacement = false;
+            DB.SendPlaceBagItemRequest(Mod, _pendingPlacementRequestId, sourceSlot, spawnPos.X, spawnPos.Y, BagPayloadHelper.FromItem(this));
+            return true;
+        }
 
         // Spawn the bag NPC at cursor position
         var modPlayer = player.GetModPlayer<Players.DeathBagPlayer>();
@@ -141,8 +161,65 @@ public sealed class DeathBagItem : ModItem
 
         DB.LogBagContents(Mod, "placed bag via left-click", OwnerName, Kind, SavedInventory);
         SavedInventory = new();
+        _consumeAfterImmediatePlacement = true;
 
         return true; // consumed
+    }
+
+    public override bool ConsumeItem(Player player)
+    {
+        return _consumeAfterImmediatePlacement;
+    }
+
+    internal void CancelPendingPlacement()
+    {
+        _pendingPlacementRequestId = 0;
+        _consumeAfterImmediatePlacement = true;
+    }
+
+    internal bool TryConsumePendingPlacement(Player player, int slot)
+    {
+        if (_pendingPlacementRequestId == 0)
+            return false;
+        if (slot < 0 || slot >= SlotHelper.MainInventorySlotCount)
+            return false;
+        if (!ReferenceEquals(player.inventory[slot]?.ModItem, this))
+            return false;
+
+        DB.LogBagContents(Mod, "placed bag via left-click", OwnerName, Kind, SavedInventory);
+        player.inventory[slot].TurnToAir();
+        CancelPendingPlacement();
+        return true;
+    }
+
+    internal static bool TryResolvePendingPlacement(Player player, int requestId, out DeathBagItem bagItem, out int slot)
+    {
+        for (int i = 0; i < SlotHelper.MainInventorySlotCount; i++)
+        {
+            if (player.inventory[i]?.ModItem is not DeathBagItem candidate)
+                continue;
+            if (candidate._pendingPlacementRequestId != requestId)
+                continue;
+
+            bagItem = candidate;
+            slot = i;
+            return true;
+        }
+
+        bagItem = null;
+        slot = -1;
+        return false;
+    }
+
+    private int FindCurrentInventorySlot(Player player)
+    {
+        for (int i = 0; i < SlotHelper.MainInventorySlotCount; i++)
+        {
+            if (ReferenceEquals(player.inventory[i]?.ModItem, this))
+                return i;
+        }
+
+        return -1;
     }
 
     public override bool CanRightClick()
@@ -237,11 +314,7 @@ public sealed class DeathBagItem : ModItem
         NPC npc = Main.npc[npcIndex];
         if (npc.ModNPC is DeathBagNPC bagNPC)
         {
-            bagNPC.Kind = Kind;
-            bagNPC.OwnerName = OwnerName;
-            bagNPC.DeathLoadoutIndex = DeathLoadoutIndex;
-            bagNPC.SavedInventory = DB.CloneInventory(SavedInventory);
-            bagNPC.DeliveredBy = CarrierName;
+            BagPayloadHelper.ApplyToNPC(bagNPC, BagPayloadHelper.FromItem(this), ownerPlayerIndex: -1);
             bagNPC.ResolveOwnerIndex();
             npc.netUpdate = true;
             Mod.Logger.Info($"[DeathBag] Converted bag item back to NPC for {OwnerName} with {SavedInventory.Count} items, kind={Kind} (delivered by {CarrierName})");
@@ -287,6 +360,7 @@ public sealed class DeathBagItem : ModItem
 
     public override void LoadData(TagCompound tag)
     {
+        CancelPendingPlacement();
         Kind = tag.ContainsKey("kind") ? (BagKind)tag.GetByte("kind") : BagKind.Death;
         OwnerName = tag.GetString("ownerName");
         DeathLoadoutIndex = tag.ContainsKey("deathLoadout") ? tag.GetInt("deathLoadout") : 0;
@@ -326,6 +400,7 @@ public sealed class DeathBagItem : ModItem
         DeathLoadoutIndex = reader.ReadInt32();
         CarrierName = reader.ReadString();
         SavedInventory = DB.ReadInventory(reader);
+        CancelPendingPlacement();
 
         // Restore display name after net sync
         string kindName = DB.GetBagKindName(Kind);

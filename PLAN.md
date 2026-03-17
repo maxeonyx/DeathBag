@@ -108,6 +108,18 @@ Extract a single `SlotHelper` utility with slot constants and a generic mapping 
 
 Bag items/NPCs are constructed with field-by-field setup in 4+ places. Extract a `BagFactory` or similar helper for one-line bag creation.
 
+## TODO: Full-Fidelity Bag Packet Serialization
+
+Current multiplayer bag sync uses a lossy inventory codec (`type`, `stack`, `prefix`, `favorited`) instead of full `ItemIO`-equivalent serialization. This is risky for modded items and any item state beyond the basic fields.
+
+Do this as a dedicated multiplayer/state-format change, not mixed into local refactors. Treat it as a packet compatibility change that requires version coordination.
+
+## TODO: Validate Destructive Bag Removal Requests
+
+`HandleBagRemoved` currently trusts the incoming NPC index and removes the bag without validating that the requesting client is allowed to remove it or that the removal corresponds to a completed safe operation.
+
+Tighten this before expanding bag interaction paths further.
+
 ## Completed
 
 ### Right-click to open own loadout bags in inventory — DONE
