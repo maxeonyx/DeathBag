@@ -23,6 +23,11 @@ public sealed class DeathBagState : ModSystem
         On_ItemSlot.SellOrTrash += OnSellOrTrash;
     }
 
+    public override void OnModUnload()
+    {
+        On_ItemSlot.SellOrTrash -= OnSellOrTrash;
+    }
+
     public override void OnWorldLoad()
     {
         _pendingItemMigrationSweep = true;
