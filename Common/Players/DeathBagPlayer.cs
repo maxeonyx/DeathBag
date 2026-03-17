@@ -351,7 +351,7 @@ public sealed class DeathBagPlayer : ModPlayer
 
         Mod.Logger.Info($"[DeathBag] Current inventory snapshot: {currentSnapshot.Count} items (after filtering copper tools + bag items)");
 
-        // === 2. CREATE overflow bag item for current inventory (if non-empty) ===
+        // === 2. CREATE displaced-items bag for current inventory (if non-empty) ===
         Item? loadoutBagItem = null;
         if (currentSnapshot.Count > 0)
         {
@@ -383,7 +383,7 @@ public sealed class DeathBagPlayer : ModPlayer
 
         Mod.Logger.Info($"[DeathBag] Placed {bag.SavedInventory.Count} bag items into inventory");
 
-        // === 5. PLACE overflow bag item into inventory ===
+        // === 5. PLACE displaced-items bag item into inventory ===
         if (loadoutBagItem != null)
         {
             bool needsOverflowHelp = true;
@@ -398,7 +398,7 @@ public sealed class DeathBagPlayer : ModPlayer
 
             if (needsOverflowHelp)
             {
-                Mod.Logger.Info("[DeathBag] Main inventory is full after restore; attempting overflow compaction for overflow bag");
+                Mod.Logger.Info("[DeathBag] Main inventory is full after restore; attempting overflow compaction for displaced-items bag");
                 TryFreeSlotsForLoadoutBag(preserved);
             }
 
@@ -406,11 +406,11 @@ public sealed class DeathBagPlayer : ModPlayer
             if (remainder is not null && !remainder.IsAir)
             {
                 Player.QuickSpawnItem(Player.GetSource_Misc("DeathBagLoadout"), remainder, remainder.stack);
-                Mod.Logger.Info("[DeathBag] No room for overflow bag item — dropped on ground");
+                Mod.Logger.Info($"[DeathBag] No room for {remainder.Name} — dropped on ground");
             }
             else
             {
-                Mod.Logger.Info("[DeathBag] Placed overflow bag item in inventory");
+                Mod.Logger.Info($"[DeathBag] Placed {loadoutBagItem.Name} in inventory");
             }
         }
 
