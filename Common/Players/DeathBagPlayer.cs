@@ -158,7 +158,7 @@ public sealed class DeathBagPlayer : ModPlayer
             Player.inventory[slotIndex] = displacedItem.Clone();
     }
 
-    private bool TryFreeSlotsForLoadoutBag(List<(int SlotIndex, Item Item)> preserved)
+    private bool TryFreeSlotsForCarryoverBag(List<(int SlotIndex, Item Item)> preserved)
     {
         Item? existingOverflowBag = FindExistingOverflowBag(preserved);
         int preservedBagSlotsNeeded = CountPreservedBagItemsNeedingNewSlots(preserved);
@@ -180,7 +180,7 @@ public sealed class DeathBagPlayer : ModPlayer
         if (displacedItems.Count < neededFreedSlots)
         {
             RestoreDisplacedMainInventoryItems(displacedItems);
-            Mod.Logger.Info("[DeathBag] Could not free enough non-favorited main inventory slots to keep overflow bag in inventory");
+            Mod.Logger.Info("[DeathBag] Could not free enough non-favorited main inventory slots to keep carryover loadout bag in inventory");
             return false;
         }
 
@@ -309,10 +309,10 @@ public sealed class DeathBagPlayer : ModPlayer
     /// <summary>
     /// Restores inventory from a bag NPC:
     /// 1. Snapshot current inventory (excluding copper tools and bag items)
-    /// 2. If snapshot is non-empty, create an overflow bag item holding that snapshot
+    /// 2. If snapshot is non-empty, create a loadout bag item holding that snapshot
     /// 3. Clear inventory (preserving copper tools and bag items)
     /// 4. Place bag's saved items into their exact original slots
-    /// 5. Place the overflow bag item into an empty inventory slot (or drop if no room)
+    /// 5. Place the carryover loadout bag item into an empty inventory slot (or drop if no room)
     /// 6. Sync all slots to server
     /// </summary>
     public void RestoreFromBag(DeathBagNPC bag)
@@ -342,12 +342,12 @@ public sealed class DeathBagPlayer : ModPlayer
 
         Mod.Logger.Info($"[DeathBag] Current inventory snapshot: {currentSnapshot.Count} items (after filtering copper tools + bag items)");
 
-        // Current carried inventory becomes an overflow bag item, matching pre-split behavior.
-        Item? loadoutBagItem = null;
+        // Current carried inventory becomes a loadout bag item.
+        Item? carryoverBagItem = null;
         if (currentSnapshot.Count > 0)
         {
-            loadoutBagItem = CreateBagItem(BagKind.Overflow, currentSnapshot);
-            Mod.Logger.Info($"[DeathBag] Created overflow bag item with {currentSnapshot.Count} items");
+            carryoverBagItem = CreateBagItem(BagKind.Loadout, currentSnapshot);
+            Mod.Logger.Info($"[DeathBag] Created carryover loadout bag item with {currentSnapshot.Count} items");
         }
 
         ClearInventory(preserveBagItems: false, preserveCopperTools: false);
@@ -368,7 +368,7 @@ public sealed class DeathBagPlayer : ModPlayer
 
         Mod.Logger.Info($"[DeathBag] Placed {bag.SavedInventory.Count} bag items into inventory");
 
-        if (loadoutBagItem != null)
+        if (carryoverBagItem != null)
         {
             bool needsOverflowHelp = true;
             for (int i = 0; i < SlotHelper.MainInventorySlotCount; i++)
@@ -382,19 +382,19 @@ public sealed class DeathBagPlayer : ModPlayer
 
             if (needsOverflowHelp)
             {
-                Mod.Logger.Info("[DeathBag] Main inventory is full after restore; attempting overflow compaction for overflow bag");
-                TryFreeSlotsForLoadoutBag(preserved);
+                Mod.Logger.Info("[DeathBag] Main inventory is full after restore; attempting overflow compaction for carryover loadout bag");
+                TryFreeSlotsForCarryoverBag(preserved);
             }
 
-            Item remainder = Player.GetItem(Player.whoAmI, loadoutBagItem, GetItemSettings.NPCEntityToPlayerInventorySettings);
+            Item remainder = Player.GetItem(Player.whoAmI, carryoverBagItem, GetItemSettings.NPCEntityToPlayerInventorySettings);
             if (remainder is not null && !remainder.IsAir)
             {
                 Player.QuickSpawnItem(Player.GetSource_Misc("DeathBagLoadout"), remainder, remainder.stack);
-                Mod.Logger.Info("[DeathBag] No room for overflow bag item — dropped on ground");
+                Mod.Logger.Info("[DeathBag] No room for carryover loadout bag item — dropped on ground");
             }
             else
             {
-                Mod.Logger.Info("[DeathBag] Placed overflow bag item in inventory");
+                Mod.Logger.Info("[DeathBag] Placed carryover loadout bag item in inventory");
             }
         }
 

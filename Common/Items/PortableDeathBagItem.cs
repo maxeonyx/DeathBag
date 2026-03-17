@@ -24,13 +24,4 @@ public sealed class PortableDeathBagItem : BagItemBase
         Item.noUseGraphic = true;
     }
 
-    public override bool CanUseItem(Player player)
-    {
-        return CanPlaceBag(player);
-    }
-
-    public override bool? UseItem(Player player)
-    {
-        return PlaceBag(player);
-    }
 }

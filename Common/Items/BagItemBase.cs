@@ -23,6 +23,7 @@ public abstract class BagItemBase : ModItem
 
     private bool _consumeAfterImmediatePlacement = true;
     private int _pendingPlacementRequestId;
+    private BagPayload? _pendingPlacementPayload;
 
     public abstract BagKind Kind { get; }
 
@@ -108,6 +109,19 @@ public abstract class BagItemBase : ModItem
     public override bool ConsumeItem(Player player)
     {
         return SavedInventory.Count == 0 || _consumeAfterImmediatePlacement;
+    }
+
+    public override bool CanUseItem(Player player)
+    {
+        return CanPlaceByUse && CanPlaceBag(player);
+    }
+
+    public override bool? UseItem(Player player)
+    {
+        if (!CanPlaceByUse)
+            return base.UseItem(player);
+
+        return PlaceBag(player);
     }
 
     public override bool CanPickup(Player player)
@@ -204,8 +218,9 @@ public abstract class BagItemBase : ModItem
             }
 
             _pendingPlacementRequestId = _nextPlacementRequestId++;
+            _pendingPlacementPayload = BagPayloadHelper.FromItem(this);
             _consumeAfterImmediatePlacement = false;
-            DB.SendPlaceBagItemRequest(Mod, _pendingPlacementRequestId, sourceSlot, spawnPos.X, spawnPos.Y, BagPayloadHelper.FromItem(this));
+            DB.SendPlaceBagItemRequest(Mod, _pendingPlacementRequestId, sourceSlot, spawnPos.X, spawnPos.Y, _pendingPlacementPayload);
             return true;
         }
 
@@ -222,6 +237,7 @@ public abstract class BagItemBase : ModItem
     internal void CancelPendingPlacement()
     {
         _pendingPlacementRequestId = 0;
+        _pendingPlacementPayload = null;
         _consumeAfterImmediatePlacement = true;
     }
 
@@ -231,7 +247,9 @@ public abstract class BagItemBase : ModItem
             return false;
         if (slot < 0 || slot >= SlotHelper.MainInventorySlotCount)
             return false;
-        if (!ReferenceEquals(player.inventory[slot]?.ModItem, this))
+        if (_pendingPlacementPayload is null)
+            return false;
+        if (!DB.IsMatchingBagItem(player.inventory[slot], _pendingPlacementPayload))
             return false;
 
         DB.LogBagContents(Mod, "placed bag via left-click", OwnerName, Kind, SavedInventory);
@@ -249,6 +267,12 @@ public abstract class BagItemBase : ModItem
             if (candidate._pendingPlacementRequestId != requestId)
                 continue;
 
+            if (candidate._pendingPlacementPayload is null)
+                continue;
+
+            if (!DB.IsMatchingBagItem(player.inventory[i], candidate._pendingPlacementPayload))
+                continue;
+
             bagItem = candidate;
             slot = i;
             return true;
@@ -261,20 +285,21 @@ public abstract class BagItemBase : ModItem
 
     protected int FindCurrentInventorySlot(Player player)
     {
-        int selectedSlot = player.selectedItem;
-        if (selectedSlot >= 0 && selectedSlot < SlotHelper.MainInventorySlotCount)
-        {
-            if (ReferenceEquals(player.inventory[selectedSlot]?.ModItem, this))
-                return selectedSlot;
-        }
+        BagPayload payload = _pendingPlacementPayload ?? BagPayloadHelper.FromItem(this);
 
-        for (int i = 0; i < SlotHelper.MainInventorySlotCount; i++)
-        {
-            if (ReferenceEquals(player.inventory[i]?.ModItem, this))
-                return i;
-        }
+        int matchedSelectedSlot = FindMatchingInventorySlot(player, player.selectedItem, payload);
+        if (matchedSelectedSlot >= 0)
+            return matchedSelectedSlot;
 
-        return -1;
+        return DB.FindMatchingBagItemSlot(player, payload);
+    }
+
+    private static int FindMatchingInventorySlot(Player player, int slot, BagPayload payload)
+    {
+        if (slot < 0 || slot >= SlotHelper.MainInventorySlotCount)
+            return -1;
+
+        return DB.IsMatchingBagItem(player.inventory[slot], payload) ? slot : -1;
     }
 
     private bool SpawnBagNPCFromItem()

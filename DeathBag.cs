@@ -91,6 +91,12 @@ public sealed class DeathBag : Mod
         return FindMatchingBagItemSlot(player, ownerName, kind, deathLoadoutIndex, carrierName, inventory, excludedSlot: -1);
     }
 
+    internal static int FindMatchingBagItemSlot(Player player, BagPayload payload, int excludedSlot = -1)
+    {
+        return FindMatchingBagItemSlot(player, payload.OwnerName, payload.Kind, payload.DeathLoadoutIndex,
+            payload.CarrierName, payload.SavedInventory, excludedSlot);
+    }
+
     internal static int FindNewMatchingBagItemSlot(Player player, string ownerName, BagKind kind, int deathLoadoutIndex,
         string carrierName, List<(int SlotIndex, Item Item)> inventory, HashSet<int> previouslyMatchingSlots)
     {
@@ -118,6 +124,12 @@ public sealed class DeathBag : Mod
         }
 
         return slots;
+    }
+
+    internal static bool IsMatchingBagItem(Item item, BagPayload payload)
+    {
+        return IsMatchingBagItem(item, payload.OwnerName, payload.Kind, payload.DeathLoadoutIndex,
+            payload.CarrierName, payload.SavedInventory);
     }
 
     private static int FindMatchingBagItemSlot(Player player, string ownerName, BagKind kind, int deathLoadoutIndex,
