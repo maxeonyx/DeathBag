@@ -3,6 +3,7 @@ using System.IO;
 using Terraria;
 using Terraria.ID;
 using Terraria.ModLoader;
+using DeathBag.Common;
 using DeathBag.Common.Items;
 using DeathBag.Common.NPCs;
 
@@ -20,6 +21,10 @@ public sealed class DeathBag : Mod
         BagToItem,
         /// <summary>Server -> client: bag NPC removed, place this DeathBagItem in your inventory.</summary>
         BagToItemResponse,
+        /// <summary>Client -> server: place a bag item into the world as a bag NPC.</summary>
+        PlaceBagItemRequest,
+        /// <summary>Server -> client: result of bag item placement request.</summary>
+        PlaceBagItemResponse,
     }
 
     public override void HandlePacket(BinaryReader reader, int whoAmI)
@@ -39,6 +44,12 @@ public sealed class DeathBag : Mod
                 break;
             case MessageType.BagToItemResponse:
                 HandleBagToItemResponse(reader);
+                break;
+            case MessageType.PlaceBagItemRequest:
+                HandlePlaceBagItemRequest(reader, whoAmI);
+                break;
+            case MessageType.PlaceBagItemResponse:
+                HandlePlaceBagItemResponse(reader);
                 break;
             default:
                 Logger.Warn($"[DeathBag] Unknown packet type: {msgType}");
@@ -163,46 +174,21 @@ public sealed class DeathBag : Mod
 
     private void HandleBagCreated(BinaryReader reader, int whoAmI)
     {
-        var kind = (BagKind)reader.ReadByte();
         float x = reader.ReadSingle();
         float y = reader.ReadSingle();
-        string ownerName = reader.ReadString();
         int ownerIndex = reader.ReadInt32();
-        int deathLoadoutIndex = reader.ReadInt32();
-        var inventory = ReadInventory(reader);
+        var payload = ReadBagPayload(reader);
 
         if (Main.netMode != NetmodeID.Server)
             return;
 
-        string kindName = GetBagKindName(kind);
-        Logger.Info($"[DeathBag] Server: BagCreated ({kindName}) from {ownerName} with {inventory.Count} items at ({x:F0}, {y:F0}), loadout {deathLoadoutIndex}");
+        string kindName = GetBagKindName(payload.Kind);
+        Logger.Info($"[DeathBag] Server: BagCreated ({kindName}) from {payload.OwnerName} with {payload.SavedInventory.Count} items at ({x:F0}, {y:F0}), loadout {payload.DeathLoadoutIndex}");
 
-        int npcIndex = NPC.NewNPC(
-            Terraria.Entity.GetSource_NaturalSpawn(),
-            (int)x, (int)y,
-            ModContent.NPCType<DeathBagNPC>());
-
-        if (npcIndex < 0 || npcIndex >= Main.maxNPCs)
-        {
-            Logger.Error($"[DeathBag] CRITICAL: Server failed to spawn bag NPC (NewNPC={npcIndex}), {inventory.Count} items LOST for {ownerName}!");
-            LogBagContents(this, "FAILED BagCreated (NPC slot full)", ownerName, kind, inventory);
+        if (!TrySpawnBagNPC(x, y, payload, ownerIndex, Terraria.Entity.GetSource_NaturalSpawn(), out _))
             return;
-        }
 
-        NPC npc = Main.npc[npcIndex];
-        if (npc.ModNPC is DeathBagNPC bagNPC)
-        {
-            bagNPC.Kind = kind;
-            bagNPC.OwnerName = ownerName;
-            bagNPC.OwnerPlayerIndex = ownerIndex;
-            bagNPC.DeathLoadoutIndex = deathLoadoutIndex;
-            bagNPC.SavedInventory = CloneInventory(inventory);
-
-            // netAlways + netUpdate ensures vanilla syncs this NPC (with SendExtraAI data) to all clients
-            npc.netUpdate = true;
-
-            LogBagContents(this, "BagCreated (server)", ownerName, kind, inventory);
-        }
+        LogBagContents(this, "BagCreated (server)", payload.OwnerName, payload.Kind, payload.SavedInventory);
     }
 
     private void HandleBagRemoved(BinaryReader reader, int whoAmI)
@@ -254,11 +240,9 @@ public sealed class DeathBag : Mod
         var response = GetPacket();
         response.Write((byte)MessageType.BagToItemResponse);
         response.Write(npcIndex); // client needs this to send BagRemoved on success
-        response.Write((byte)bagNPC.Kind);
-        response.Write(bagNPC.OwnerName);
-        response.Write(bagNPC.DeathLoadoutIndex);
-        response.Write(carrierName);
-        WriteInventory(response, bagNPC.SavedInventory);
+        var payload = BagPayloadHelper.FromNPC(bagNPC);
+        payload.CarrierName = carrierName;
+        WriteBagPayload(response, payload);
         response.Send(whoAmI); // to requesting client only
 
         string kindName = GetBagKindName(bagNPC.Kind);
@@ -268,36 +252,22 @@ public sealed class DeathBag : Mod
     private void HandleBagToItemResponse(BinaryReader reader)
     {
         int npcIndex = reader.ReadInt32();
-        var kind = (BagKind)reader.ReadByte();
-        string ownerName = reader.ReadString();
-        int deathLoadoutIndex = reader.ReadInt32();
-        string carrierName = reader.ReadString();
-        var inventory = ReadInventory(reader);
+        var payload = ReadBagPayload(reader);
 
         if (Main.netMode != NetmodeID.MultiplayerClient)
             return;
 
         Player localPlayer = Main.LocalPlayer;
-        string kindName = GetBagKindName(kind);
-        HashSet<int> previouslyMatchingSlots = FindMatchingBagItemSlots(localPlayer, ownerName, kind, deathLoadoutIndex, carrierName, inventory);
+        string kindName = GetBagKindName(payload.Kind);
+        HashSet<int> previouslyMatchingSlots = FindMatchingBagItemSlots(localPlayer, payload.OwnerName, payload.Kind, payload.DeathLoadoutIndex, payload.CarrierName, payload.SavedInventory);
 
         // Create the bag item in our own inventory (client-authoritative)
-        var item = new Item();
-        item.SetDefaults(ModContent.ItemType<DeathBagItem>());
-        if (item.ModItem is DeathBagItem bagItem)
-        {
-            bagItem.Kind = kind;
-            bagItem.OwnerName = ownerName;
-            bagItem.DeathLoadoutIndex = deathLoadoutIndex;
-            bagItem.SavedInventory = CloneInventory(inventory);
-            bagItem.CarrierName = carrierName;
-        }
-        item.SetNameOverride($"{ownerName}'s {kindName}");
+        Item item = BagPayloadHelper.CreateBagItem(payload);
 
         Item remainder = localPlayer.GetItem(localPlayer.whoAmI, item, GetItemSettings.NPCEntityToPlayerInventorySettings);
         if (remainder is not null && !remainder.IsAir)
         {
-            Logger.Warn($"[DeathBag] Client: no room for {ownerName}'s bag item — bag NPC preserved on server");
+            Logger.Warn($"[DeathBag] Client: no room for {payload.OwnerName}'s bag item — bag NPC preserved on server");
             Main.NewText("No room in your inventory!", Microsoft.Xna.Framework.Color.Yellow);
             // Do NOT send BagRemoved — the NPC stays alive on the server
             return;
@@ -306,15 +276,82 @@ public sealed class DeathBag : Mod
         // Item placed successfully — NOW tell the server to remove the bag NPC
         SendBagRemoved(this, npcIndex);
 
-        LogBagContents(this, "non-owner pickup (MP client)", ownerName, kind, inventory);
+        LogBagContents(this, "non-owner pickup (MP client)", payload.OwnerName, payload.Kind, payload.SavedInventory);
 
         // Item placed successfully — sync the slot to server. Find which slot GetItem placed it in.
-        int placedSlot = FindNewMatchingBagItemSlot(localPlayer, ownerName, kind, deathLoadoutIndex, carrierName, inventory, previouslyMatchingSlots);
+        int placedSlot = FindNewMatchingBagItemSlot(localPlayer, payload.OwnerName, payload.Kind, payload.DeathLoadoutIndex, payload.CarrierName, payload.SavedInventory, previouslyMatchingSlots);
         if (placedSlot >= 0)
             NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, localPlayer.whoAmI, placedSlot);
 
-        Logger.Info($"[DeathBag] Client: placed {ownerName}'s {kindName} in inventory slot {placedSlot}, sent BagRemoved for NPC {npcIndex}");
-        Main.NewText($"Picked up {ownerName}'s {kindName.ToLower()}.", Microsoft.Xna.Framework.Color.Green);
+        Logger.Info($"[DeathBag] Client: placed {payload.OwnerName}'s {kindName} in inventory slot {placedSlot}, sent BagRemoved for NPC {npcIndex}");
+        Main.NewText($"Picked up {payload.OwnerName}'s {kindName.ToLower()}.", Microsoft.Xna.Framework.Color.Green);
+    }
+
+    private void HandlePlaceBagItemRequest(BinaryReader reader, int whoAmI)
+    {
+        int requestId = reader.ReadInt32();
+        int sourceSlot = reader.ReadInt32();
+        float x = reader.ReadSingle();
+        float y = reader.ReadSingle();
+        var payload = ReadBagPayload(reader);
+
+        if (Main.netMode != NetmodeID.Server)
+            return;
+
+        bool success = TrySpawnBagNPC(x, y, payload, ownerPlayerIndex: -1, Terraria.Entity.GetSource_NaturalSpawn(), out int npcIndex);
+
+        var response = GetPacket();
+        response.Write((byte)MessageType.PlaceBagItemResponse);
+        response.Write(requestId);
+        response.Write(sourceSlot);
+        response.Write(success);
+        response.Send(whoAmI);
+
+        if (!success)
+        {
+            Logger.Warn($"[DeathBag] Server: bag item placement request {requestId} failed for {payload.OwnerName}");
+            return;
+        }
+
+        LogBagContents(this, "bag item placed into world (server)", payload.OwnerName, payload.Kind, payload.SavedInventory);
+        Logger.Info($"[DeathBag] Server: bag item placement request {requestId} succeeded for {payload.OwnerName} from slot {sourceSlot} to NPC {npcIndex}");
+    }
+
+    private void HandlePlaceBagItemResponse(BinaryReader reader)
+    {
+        int requestId = reader.ReadInt32();
+        int sourceSlot = reader.ReadInt32();
+        bool success = reader.ReadBoolean();
+
+        if (Main.netMode != NetmodeID.MultiplayerClient)
+            return;
+
+        Player localPlayer = Main.LocalPlayer;
+        if (!DeathBagItem.TryResolvePendingPlacement(localPlayer, requestId, out DeathBagItem bagItem, out int currentSlot))
+        {
+            Logger.Error($"[DeathBag] Client: placement response {requestId} arrived but no pending bag item was found");
+            Main.NewText("Bag placement finished, but the source item could not be found safely.", Microsoft.Xna.Framework.Color.Yellow);
+            return;
+        }
+
+        if (!success)
+        {
+            bagItem.CancelPendingPlacement();
+            Main.NewText("Could not place bag right now.", Microsoft.Xna.Framework.Color.Yellow);
+            return;
+        }
+
+        if (currentSlot != sourceSlot)
+            Logger.Warn($"[DeathBag] Client: pending bag placement request {requestId} moved from slot {sourceSlot} to {currentSlot} before confirmation");
+
+        if (!bagItem.TryConsumePendingPlacement(localPlayer, currentSlot))
+        {
+            Logger.Error($"[DeathBag] Client: failed to consume pending bag item for request {requestId} after confirmed placement");
+            Main.NewText("Bag was placed, but the source item could not be consumed safely.", Microsoft.Xna.Framework.Color.Yellow);
+            return;
+        }
+
+        NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, localPlayer.whoAmI, currentSlot);
     }
 
     /// <summary>
@@ -325,13 +362,16 @@ public sealed class DeathBag : Mod
     {
         var packet = mod.GetPacket();
         packet.Write((byte)MessageType.BagCreated);
-        packet.Write((byte)kind);
         packet.Write(x);
         packet.Write(y);
-        packet.Write(ownerName);
         packet.Write(ownerIndex);
-        packet.Write(deathLoadoutIndex);
-        WriteInventory(packet, inventory);
+        WriteBagPayload(packet, new BagPayload
+        {
+            Kind = kind,
+            OwnerName = ownerName,
+            DeathLoadoutIndex = deathLoadoutIndex,
+            SavedInventory = inventory,
+        });
         packet.Send(); // to server
     }
 
@@ -357,6 +397,18 @@ public sealed class DeathBag : Mod
         packet.Write(npcIndex);
         packet.Write(carrierName);
         packet.Send(); // to server
+    }
+
+    internal static void SendPlaceBagItemRequest(Mod mod, int requestId, int sourceSlot, float x, float y, BagPayload payload)
+    {
+        var packet = mod.GetPacket();
+        packet.Write((byte)MessageType.PlaceBagItemRequest);
+        packet.Write(requestId);
+        packet.Write(sourceSlot);
+        packet.Write(x);
+        packet.Write(y);
+        WriteBagPayload(packet, payload);
+        packet.Send();
     }
 
     // === Shared inventory serialization (used by packets and SendExtraAI) ===
@@ -398,6 +450,27 @@ public sealed class DeathBag : Mod
         }
     }
 
+    internal static void WriteBagPayload(BinaryWriter writer, BagPayload payload)
+    {
+        writer.Write((byte)payload.Kind);
+        writer.Write(payload.OwnerName ?? "");
+        writer.Write(payload.DeathLoadoutIndex);
+        writer.Write(payload.CarrierName ?? "");
+        WriteInventory(writer, payload.SavedInventory);
+    }
+
+    internal static BagPayload ReadBagPayload(BinaryReader reader)
+    {
+        return new BagPayload
+        {
+            Kind = (BagKind)reader.ReadByte(),
+            OwnerName = reader.ReadString(),
+            DeathLoadoutIndex = reader.ReadInt32(),
+            CarrierName = reader.ReadString(),
+            SavedInventory = ReadInventory(reader),
+        };
+    }
+
     internal static List<(int SlotIndex, Item Item)> ReadInventory(BinaryReader reader)
     {
         int count = reader.ReadInt32();
@@ -418,5 +491,30 @@ public sealed class DeathBag : Mod
             inventory.Add((slotIndex, item));
         }
         return inventory;
+    }
+
+    private bool TrySpawnBagNPC(float x, float y, BagPayload payload, int ownerPlayerIndex, Terraria.DataStructures.IEntitySource source, out int npcIndex)
+    {
+        npcIndex = NPC.NewNPC(source, (int)x, (int)y, ModContent.NPCType<DeathBagNPC>());
+
+        if (npcIndex < 0 || npcIndex >= Main.maxNPCs)
+        {
+            Logger.Error($"[DeathBag] CRITICAL: failed to spawn bag NPC (NewNPC={npcIndex}) for {payload.OwnerName} with {payload.SavedInventory.Count} items");
+            LogBagContents(this, "FAILED bag NPC spawn", payload.OwnerName, payload.Kind, payload.SavedInventory);
+            return false;
+        }
+
+        NPC npc = Main.npc[npcIndex];
+        if (npc.ModNPC is not DeathBagNPC bagNPC)
+        {
+            Logger.Error($"[DeathBag] CRITICAL: spawned NPC at index {npcIndex} is not DeathBagNPC");
+            LogBagContents(this, "FAILED bag NPC spawn (wrong NPC type)", payload.OwnerName, payload.Kind, payload.SavedInventory);
+            return false;
+        }
+
+        BagPayloadHelper.ApplyToNPC(bagNPC, payload, ownerPlayerIndex);
+        bagNPC.ResolveOwnerIndex();
+        npc.netUpdate = true;
+        return true;
     }
 }

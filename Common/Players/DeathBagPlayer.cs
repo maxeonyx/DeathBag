@@ -103,17 +103,15 @@ public sealed class DeathBagPlayer : ModPlayer
 
     private Item CreateBagItem(BagKind kind, List<(int SlotIndex, Item Item)> savedInventory)
     {
-        Item bagItem = new();
-        bagItem.SetDefaults(ModContent.ItemType<Items.DeathBagItem>());
-        if (bagItem.ModItem is Items.DeathBagItem deathBagItem)
+        var payload = new BagPayload
         {
-            deathBagItem.Kind = kind;
-            deathBagItem.OwnerName = Player.name;
-            deathBagItem.DeathLoadoutIndex = Player.CurrentLoadoutIndex;
-            deathBagItem.SavedInventory = DB.CloneInventory(savedInventory);
-        }
-        bagItem.SetNameOverride($"{Player.name}'s {DB.GetBagKindName(kind)}");
-        return bagItem;
+            Kind = kind,
+            OwnerName = Player.name,
+            DeathLoadoutIndex = Player.CurrentLoadoutIndex,
+            SavedInventory = savedInventory,
+        };
+
+        return BagPayloadHelper.CreateBagItem(payload);
     }
 
     private Item? FindExistingOverflowBag(List<(int SlotIndex, Item Item)> preserved)
@@ -554,11 +552,15 @@ public sealed class DeathBagPlayer : ModPlayer
         NPC npc = Main.npc[npcIndex];
         if (npc.ModNPC is DeathBagNPC bagNPC)
         {
-            bagNPC.Kind = kind;
-            bagNPC.OwnerPlayerIndex = -1; // Will be resolved by ResolveOwnerIndex
-            bagNPC.OwnerName = ownerName;
-            bagNPC.DeathLoadoutIndex = deathLoadoutIndex;
-            bagNPC.SavedInventory = DB.CloneInventory(inventory);
+            var payload = new BagPayload
+            {
+                Kind = kind,
+                OwnerName = ownerName,
+                DeathLoadoutIndex = deathLoadoutIndex,
+                SavedInventory = inventory,
+            };
+
+            BagPayloadHelper.ApplyToNPC(bagNPC, payload, ownerPlayerIndex: -1); // Will be resolved by ResolveOwnerIndex
             npc.netUpdate = true;
             bagNPC.ResolveOwnerIndex();
             Mod.Logger.Info($"[DeathBag] Bag NPC spawned (index {npcIndex}) for {ownerName} with {inventory.Count} items, kind={kind}, loadout {deathLoadoutIndex}");

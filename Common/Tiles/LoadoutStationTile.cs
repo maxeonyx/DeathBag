@@ -88,17 +88,15 @@ public sealed class LoadoutStationTile : ModTile
         ClearSnapshotFromInventory(player, snapshot);
 
         // Create loadout bag item and place in inventory
-        var item = new Item();
-        item.SetDefaults(ModContent.ItemType<DeathBagItem>());
-        if (item.ModItem is DeathBagItem bagItem)
+        var payload = new BagPayload
         {
-            bagItem.Kind = BagKind.Loadout;
-            bagItem.OwnerName = player.name;
-            bagItem.DeathLoadoutIndex = loadoutIndex;
-            bagItem.SavedInventory = DB.CloneInventory(snapshot);
-            bagItem.CarrierName = player.name;
-        }
-        item.SetNameOverride($"{player.name}'s Loadout");
+            Kind = BagKind.Loadout,
+            OwnerName = player.name,
+            DeathLoadoutIndex = loadoutIndex,
+            CarrierName = player.name,
+            SavedInventory = snapshot,
+        };
+        Item item = BagPayloadHelper.CreateBagItem(payload);
 
         Item remainder = player.GetItem(player.whoAmI, item, GetItemSettings.NPCEntityToPlayerInventorySettings);
         if (remainder is not null && !remainder.IsAir)

@@ -174,11 +174,14 @@ public sealed class DeathBagState : ModSystem
                 continue;
             }
 
-            bagNPC.Kind = data.Kind;
-            bagNPC.OwnerName = data.OwnerName;
-            bagNPC.OwnerPlayerIndex = ResolvePlayerIndex(data.OwnerName);
-            bagNPC.SavedInventory = DB.CloneInventory(data.Inventory);
-            bagNPC.DeathLoadoutIndex = data.DeathLoadoutIndex;
+            var payload = new BagPayload
+            {
+                Kind = data.Kind,
+                OwnerName = data.OwnerName,
+                DeathLoadoutIndex = data.DeathLoadoutIndex,
+                SavedInventory = data.Inventory,
+            };
+            BagPayloadHelper.ApplyToNPC(bagNPC, payload, ResolvePlayerIndex(data.OwnerName));
             npc.netUpdate = true;
 
             _pendingBags.RemoveAt(i); // Successfully spawned — remove from pending

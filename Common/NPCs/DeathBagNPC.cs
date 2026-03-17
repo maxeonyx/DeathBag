@@ -8,6 +8,7 @@ using Terraria;
 using Terraria.ID;
 using Terraria.ModLoader;
 using Terraria.UI.Chat;
+using DeathBag.Common;
 using DB = DeathBag.DeathBag;
 
 namespace DeathBag.Common.NPCs;
@@ -237,17 +238,9 @@ public sealed class DeathBagNPC : ModNPC
         {
             // Singleplayer: place item directly in player's inventory
             string kindName = DB.GetBagKindName(Kind);
-            var item = new Item();
-            item.SetDefaults(ModContent.ItemType<Items.DeathBagItem>());
-            if (item.ModItem is Items.DeathBagItem bagItem)
-            {
-                bagItem.Kind = Kind;
-                bagItem.OwnerName = OwnerName;
-                bagItem.DeathLoadoutIndex = DeathLoadoutIndex;
-                bagItem.SavedInventory = DB.CloneInventory(SavedInventory);
-                bagItem.CarrierName = localPlayer.name;
-            }
-            item.SetNameOverride($"{OwnerName}'s {kindName}");
+            var payload = BagPayloadHelper.FromNPC(this);
+            payload.CarrierName = localPlayer.name;
+            Item item = BagPayloadHelper.CreateBagItem(payload);
 
             Item remainder = localPlayer.GetItem(localPlayer.whoAmI, item, GetItemSettings.NPCEntityToPlayerInventorySettings);
             if (remainder is not null && !remainder.IsAir)
