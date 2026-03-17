@@ -185,7 +185,7 @@ public abstract class BagItemBase : ModItem
 
         Vector2 mouseWorld = Main.MouseWorld;
         float dist = Vector2.Distance(player.Center, mouseWorld);
-        float maxRange = player.tileRangeX * 16f;
+        float maxRange = Player.tileRangeX * 16f;
         return dist <= maxRange;
     }
 
