@@ -16,9 +16,16 @@ namespace DeathBag.Common.Systems;
 /// </summary>
 public sealed class DeathBagState : ModSystem
 {
+    private static bool _pendingItemMigrationSweep;
+
     public override void Load()
     {
         On_ItemSlot.SellOrTrash += OnSellOrTrash;
+    }
+
+    public override void OnWorldLoad()
+    {
+        _pendingItemMigrationSweep = true;
     }
 
     /// <summary>
@@ -104,6 +111,7 @@ public sealed class DeathBagState : ModSystem
     public override void LoadWorldData(TagCompound tag)
     {
         _pendingBags.Clear();
+        _pendingItemMigrationSweep = true;
 
         if (!tag.ContainsKey("deathBags"))
             return;
@@ -142,6 +150,12 @@ public sealed class DeathBagState : ModSystem
     /// </summary>
     public override void PostUpdateWorld()
     {
+        if (_pendingItemMigrationSweep)
+        {
+            RunLegacyItemMigrationSweep();
+            _pendingItemMigrationSweep = false;
+        }
+
         if (_pendingBags.Count == 0)
             return;
 
@@ -202,6 +216,62 @@ public sealed class DeathBagState : ModSystem
                 return i;
         }
         return -1;
+    }
+
+    private static void RunLegacyItemMigrationSweep()
+    {
+        int migrated = 0;
+
+        foreach (Player player in Main.player)
+        {
+            if (player is null || !player.active)
+                continue;
+
+            migrated += MigrateItemArray(player.inventory);
+            migrated += MigrateItemArray(player.armor);
+            migrated += MigrateItemArray(player.dye);
+            migrated += MigrateItemArray(player.miscEquips);
+            migrated += MigrateItemArray(player.miscDyes);
+
+            foreach (var loadout in player.Loadouts)
+            {
+                migrated += MigrateItemArray(loadout.Armor);
+                migrated += MigrateItemArray(loadout.Dye);
+            }
+        }
+
+        foreach (Chest chest in Main.chest)
+        {
+            if (chest?.item is null)
+                continue;
+            migrated += MigrateItemArray(chest.item);
+        }
+
+        foreach (Item item in Main.item)
+        {
+            if (item is null || !item.active)
+                continue;
+            if (BagPayloadHelper.TryMigrateLegacyItemInPlace(item))
+                migrated++;
+        }
+
+        if (migrated > 0)
+            ModContent.GetInstance<DeathBag>().Logger.Info($"[DeathBag] Migrated {migrated} legacy bag item(s) to split item types");
+    }
+
+    private static int MigrateItemArray(Item[] items)
+    {
+        int migrated = 0;
+        if (items is null)
+            return migrated;
+
+        for (int i = 0; i < items.Length; i++)
+        {
+            if (BagPayloadHelper.TryMigrateLegacyItemInPlace(items[i]))
+                migrated++;
+        }
+
+        return migrated;
     }
 
 }

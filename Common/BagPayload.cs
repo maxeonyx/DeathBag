@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Terraria;
 using Terraria.ModLoader;
+using Terraria.ModLoader.IO;
 using DeathBag.Common.Items;
 using DeathBag.Common.NPCs;
 using DB = DeathBag.DeathBag;
@@ -69,6 +70,15 @@ internal static class BagPayloadHelper
             return;
 
         ApplyToItem(bagItem, payload);
+    }
+
+    public static bool TryMigrateLegacyItemInPlace(Item item)
+    {
+        if (item?.ModItem is not DeathBagItem legacyItem)
+            return false;
+
+        ConvertItemInPlace(item, legacyItem.ToPayload());
+        return true;
     }
 
     public static BagPayload ReadPayload(TagCompound tag)
