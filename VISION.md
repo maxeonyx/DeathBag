@@ -2,6 +2,70 @@
 
 Mediumcore QoL mod for co-op Terraria. On death, items go into a persistent bag instead of scattering. Restoring preserves exact inventory layout.
 
+## Terraria Situations
+
+These are the realities of co-op Mediumcore Terraria that DeathBag exists to address. These don't change — they're just how the game is.
+
+### 1. Death and recovery
+
+You die. Your gear is where you fell. You want it safe and back exactly how it was. You don't want to lose the scrappy stuff you picked up on the way back either.
+
+### 2. Dying on the way back
+
+You die multiple times getting back to your real gear. You eventually recover it. There's junk scattered from those intermediate deaths. You want your good stuff without hassle, don't want to lose the other stuff, but don't want to stop and deal with each little pile of items along the way.
+
+### 3. Your partner dies
+
+Their stuff is everywhere. You don't want to accidentally pick it up mid-fight. If they can't make it back, you want to grab their stuff and bring it to them as one unit without dealing with their items.
+
+### 4. Gearing up for different activities
+
+You want to swap your full inventory — hotbar, main inventory, everything — between different setups without manual shuffling.
+
+### 5. Leaving your gear
+
+You died but you can't get back right now — maybe you need to log off, maybe you need to do something else first, maybe it's just going to take a while. Your gear is still out there. You want to be confident it'll be there whenever you're ready to go get it, no matter how long that takes.
+
+### 6. Carrying your partner's stuff
+
+Your partner died and can't make it back. You pick up their stuff to bring it to them. You don't want to deal with their items — you don't want to sort through them, you don't want them mixed into your inventory, you shouldn't even be tempted to use them. You just want to carry the whole thing as one unit and hand it back.
+
+## DeathBag Situations
+
+These are situations that arise specifically from playing with the DeathBag mod. They inform design decisions.
+
+### 1. Walking back to your bag
+
+Your inventory is restored when you reach your bag, but you picked up scrappy stuff on the way back. You don't want to lose it, but you don't want to deal with it right now either.
+
+### 2. Multiple bags in a chaotic area
+
+You died a few times in the same area. There are several bags around. You got your real gear back from one of them. You don't want the others to mess up your inventory, but you don't want to lose them either.
+
+### 3. Bags in your inventory
+
+Your own bags — you want to know what's in them, deal with them quickly, and it should be obvious what your options are. You shouldn't accidentally trash one that has good stuff — you should have to open it first. Your partner's bags — you really can't do anything with them except bring them back. You shouldn't be able to destroy them at all.
+
+### 4. Opening a bag in your inventory
+
+You're back at base and you've got a bag of scrappy stuff in your inventory. You want to grab some things out of it — maybe there were some good potions in there, maybe some ore. You don't want the bag to replace your current inventory. You just want the stuff out of it.
+
+### 5. Too many bags
+
+You've been playing for a while and you've accumulated several bags. Your inventory is getting cluttered. Ideally you shouldn't have ended up with this many bags in the first place — something earlier in the flow should have kept things simpler.
+
+### 6. Interacting with bags in the world
+
+There are a couple of bags sitting on the ground near each other — maybe yours, maybe your partner's. You want to interact with the right one. You want to know whose bag is whose and what's in each one before you commit to anything.
+
+### 7. Stashing backup gear
+
+You want a spare set of gear ready for when you die — not copper tools, real equipment. You don't want to manually sort items into a chest and pull them out one by one. You want to snapshot your current setup instantly and have it ready to grab.
+
+### 8. Reusing backup gear
+
+You died and grabbed your backup gear to go recover your bag. You got your real stuff back. Now you want your backup set to be ready again for next time — you don't want to have to rearrange and re-stash it every time you use it.
+
 ## Confirmed Stories
 
 ### 1. Core Death Capture
@@ -146,9 +210,65 @@ When restoring a death bag, the player's current inventory (the scrappy stuff th
 4. The junk bag can be right-clicked in inventory to open/dump it (like a boss bag or grab bag), rather than restoring it as a loadout (which would replace your real gear again)
 
 **Key requirements:**
-- Current inventory -> bag item in inventory (or dropped if no space)
-- The junk bag needs a right-click-in-inventory mechanic to open it without triggering a full restore (dump contents on the ground or into inventory normally)
-- This is distinct from the loadout bag restore flow -- junk bags are disposable, not a saved loadout
+- Current inventory -> bag item in inventory
+- Overflow bags should never drop on the ground; if one would otherwise be created with no room, prefer ordinary inventory/void-bag absorption for displaced junk first, and if the player later dies carrying an overflow bag, its contents should fold back into the new death bag rather than persisting as a separate bag layer
+- The junk/overflow bag needs a right-click-in-inventory mechanic to open it without triggering a full restore (dump contents into inventory normally)
+- This is distinct from the loadout bag restore flow -- overflow bags are disposable junk bags, not saved loadouts
+
+### "Shitty" Death Bags (confirmed pain point)
+
+Another common flow is: die on the way back to recover your real bag, leaving behind a tiny death bag with just a few junk items / partial emergency gear. If you later miss that bag, recover your real gear, and only then restore the tiny bag, the current exact-restore behavior is awful: it wipes your good inventory back to the tiny junk snapshot and causes extra displacement/fiddling.
+
+In chaotic situations (invasions, boss aftermath, repeated recovery scrambles), multiple of these tiny bags can accumulate. Then the failure mode becomes much worse: you recover your real gear, but while moving through the area you repeatedly snap onto tiny death bags that overwrite your current inventory state, forcing repeated swap/fiddle/recover loops and often causing another death. This can cascade into a wipe/die/repeat cycle.
+
+This kind of bag is technically a death bag, but it behaves more like junk/overflow in practice.
+
+**Design goal:** tiny junk-only "shitty death bags" should not punish the player with a destructive full restore once they already have a meaningful inventory again.
+
+**Important implication:** auto-restoring exact-snapshot death bags on contact is unsafe when many low-value bags can accumulate in the same area.
+
+Another framing from playtesting: auto-restore is generally very nice when the bag inventory is clearly *better* than the player's current inventory, and very bad when it is clearly *worse*. The hard part is deciding whether "better" can be inferred reliably enough.
+
+This suggests a possible future direction:
+- Keep auto-restore for obviously high-value / primary recovery bags
+- Avoid auto-restore for obviously low-value / junky bags
+- Or expose the choice explicitly when the system cannot confidently tell
+
+Promising heuristic directions from playtesting:
+- Compare item count in the bag versus the player's current inventory
+- Compare favorited-item count, which may be a better proxy for "meaningful current setup" than raw item count
+- Explore combinations of simple heuristics before attempting anything too smart or opaque
+
+Current preferred heuristic shape:
+- First compare favorited-item count in the bag versus the player's current inventory
+- On tie, compare total item count
+- On tie again, do **not** auto-restore
+
+When a death bag does not auto-restore under this heuristic, it should behave like a loadout bag instead of forcing immediate exact restore. In practice that means the owner should get the same three options:
+- `Restore`
+- `Pick Up`
+- `Get Items`
+
+If a bag presents an owner action menu/chat UI, that UI should also summarize the bag contents well enough for the player to make the right choice without guessing. At minimum, it should show a useful contents summary rather than just the bag name.
+
+Preferred contents summary shape:
+- The first three hotbar items
+- What armor/equipment the bag contains
+- How many loadouts contain any items
+- A compact count of remaining miscellaneous items (e.g. `and 12 other items`)
+
+Potential solution directions:
+- Detect and classify some death bags as effectively junk/overflow-like rather than exact-restore bags
+- Or give death bags with a currently meaningful player inventory a safer interaction path than immediate exact restore
+- Or otherwise ensure that restoring a tiny junk death bag after recovering real gear does not wipe the player's good inventory state
+
+### Coins
+
+Coins should not be bagged on death. Coins-only death bags are not part of the intended experience and contribute to the "shitty death bag" problem.
+
+Current design preference: leave coins in the player's inventory on death rather than placing them into the death bag.
+
+If this ever changes, match vanilla Mediumcore intentionally and explicitly rather than accidentally, but the current preferred behavior is: **coins stay with the player**.
 
 ### Loadout Bag Station (CONFIRMED — building now)
 
@@ -163,13 +283,15 @@ A craftable furniture item (dungeon-tier recipe — mid game). Right-click it to
 **Key differences from death bags:**
 - **Created as an inventory item** — player chooses where to place it by dropping
 - **No magnet pull, no auto-pickup** — owner must right-click the NPC to restore
-- **Owner right-click = instant restore** — no chat UI, no confirmation dialogue. Only non-owners see the chat UI confirmation.
+- **Owner interaction should be a menu, not instant restore** — loadout bag NPCs should offer `Restore`, `Pick Up`, and `Get Items`
 - **Different color** — visually distinct from death bags (blue-green tint)
 - **Created voluntarily** — not by dying
 - **Multiple allowed** — e.g. stash a "mining loadout" near the mine and a "building loadout" near base
 - **Same persistence** — survives server restarts, saved to world file
 
 Everything else is identical: same restore logic, same non-owner pickup flow, same push-apart physics.
+
+**Chat/UI note:** the bag NPC chat should not expose irrelevant vanilla NPC options like `Happiness`.
 
 ### Lava Penalty + Lavaproof Bag
 

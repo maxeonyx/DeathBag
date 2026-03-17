@@ -81,18 +81,43 @@ Loadout bags use their own textures — both NPC and item.
 ### Non-owner pickup "no room" leaves NPC unclickable — FIXED
 After right-clicking a non-owner bag NPC and getting "No room in your inventory!", the NPC was unclickable. Fixed by calling `SetTalkNPC(-1)` to properly close the chat UI (not just clearing `npcChatText`).
 
-## Next Up
+## Refactoring: Item Type Split
+
+**Decision:** Split `DeathBagItem` into separate ModItem types. Keep one NPC type.
+
+**Rationale:** A single ModItem with a `Kind` enum causes tModLoader to use the death bag texture in any rendering path that bypasses custom PreDraw hooks (e.g. quick-stack animation). It also means all bag item types share one set of item behaviors (quick-stack, deposit, etc.) with no clean way to differentiate. Separate types fix this structurally.
+
+**New item types:**
+- `PortableDeathBagItem` — death bag in inventory; own sprite, owner can dump contents
+- `LoadoutBagItem` — loadout in inventory; blue-green sprite, owner can dump or place in world
+- `OverflowBagItem` — junk from restore; inventory-only, no world placement, owner can dump
+
+**Migration:** Old `DeathBagItem` stays as a legacy shim at the same type path. On load, reads `kind` byte and converts to the correct new type. Same TagCompound keys, same packet format.
+
+**NPC stays unified:** `DeathBagNPC` with per-instance `Kind`. Behavior differences (magnet, auto-pickup) are shallow. No overflow NPCs in new code.
+
+**Shared logic approach:** Abstract `BagItemBase : ModItem` base class with sealed leaf classes for each bag kind.
+
+## Refactoring: SlotHelper Extraction
+
+Slot-mapping logic (SyncEquipment index → Player array + offset) is duplicated in `SetSlotByIndex`, `TryPlaceInSlotIfEmpty`, and `ClearSnapshotFromInventory` across two files. Slot constants defined in three places.
+
+Extract a single `SlotHelper` utility with slot constants and a generic mapping function.
+
+## Refactoring: Bag Creation Centralization
+
+Bag items/NPCs are constructed with field-by-field setup in 4+ places. Extract a `BagFactory` or similar helper for one-line bag creation.
+
+## Completed
 
 ### Right-click to open own loadout bags in inventory — DONE
-Owner can right-click a loadout bag item in their inventory to dump its contents into their inventory (like a grab bag). Uses `Player.GetItem` with `NPCEntityToPlayerInventorySettings` for proper stacking/ammo/coin handling. Remainder items that don't fit are dropped with `QuickSpawnItem`.
+Owner can right-click a loadout bag item in their inventory to dump its contents into their inventory. Uses `Player.GetItem` with `NPCEntityToPlayerInventorySettings`.
 
 ### Death bag restore packages current inventory into a bag — DONE
-When restoring a death bag (or loadout bag NPC), the player's current inventory (junk picked up after dying) is packaged into a new loadout bag item in their inventory, not displaced/dropped.
-
-**Actual approach:** Simplified from the original plan. `ComputeRestore` and its displaced-item reshuffling logic were removed entirely. Instead: snapshot current inventory (excluding bags/copper tools), create a `DeathBagItem` with `Kind=Loadout`, clear inventory (preserving bags + copper tools), place bag's saved items into their exact slots using `SetSlotByIndex`, then place the loadout bag item into an empty inventory slot (or drop if no room). All slots synced to server in multiplayer.
+Current inventory packaged into a bag item on restore. Simplified approach: snapshot, create bag item, clear, place saved items by exact slot, place bag item.
 
 ### Loadout station recipe — DONE
-Added Wood x20 to loadout station recipe (sprite has wood framing).
+Added Wood x20 to loadout station recipe.
 
 ## Test Scenarios
 
