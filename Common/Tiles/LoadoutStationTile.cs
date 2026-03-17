@@ -62,7 +62,7 @@ public sealed class LoadoutStationTile : ModTile
         // Snapshot current inventory, excluding bag items and copper tools
         var snapshot = modPlayer.SnapshotInventory();
         snapshot.RemoveAll(entry =>
-            entry.Item.ModItem is DeathBagItem
+            entry.Item.ModItem is BagItemBase
             || entry.Item.type == ItemID.CopperShortsword
             || entry.Item.type == ItemID.CopperPickaxe
             || entry.Item.type == ItemID.CopperAxe);

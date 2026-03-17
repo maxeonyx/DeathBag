@@ -39,7 +39,7 @@ public sealed class DeathBagPlayer : ModPlayer
     {
         if (item is null || item.IsAir)
             return false;
-        if (item.ModItem is Items.DeathBagItem)
+        if (item.ModItem is Items.BagItemBase)
             return true;
         if (CopperTools.Contains(item.type))
             return true;
@@ -48,7 +48,7 @@ public sealed class DeathBagPlayer : ModPlayer
 
     private List<(int SlotIndex, Item Item)> ExtractPreservedItemsFromMainInventory()
     {
-        // Only main inventory can hold items like DeathBagItem; armor/dye etc are handled separately.
+        // Only main inventory can hold portable bag items; armor/dye etc are handled separately.
         var extracted = new List<(int, Item)>();
         for (int i = 0; i < SlotHelper.MainInventorySlotCount; i++)
         {
@@ -88,12 +88,12 @@ public sealed class DeathBagPlayer : ModPlayer
 
     private static bool IsOverflowBagItem(Item item)
     {
-        return item?.ModItem is Items.DeathBagItem bagItem && bagItem.Kind == BagKind.Overflow;
+        return item?.ModItem is Items.OverflowBagItem;
     }
 
     private static void AppendItemsToBag(Item bagItem, List<(int SlotIndex, Item Item)> items)
     {
-        if (bagItem.ModItem is not Items.DeathBagItem modBag)
+        if (bagItem.ModItem is not Items.BagItemBase modBag)
             return;
 
         modBag.SavedInventory.AddRange(items);
@@ -136,7 +136,7 @@ public sealed class DeathBagPlayer : ModPlayer
         int count = 0;
         foreach (var (slotIndex, item) in preserved)
         {
-            if (item.ModItem is not Items.DeathBagItem)
+            if (item.ModItem is not Items.BagItemBase)
                 continue;
             if (slotIndex < 0 || slotIndex >= SlotHelper.MainInventorySlotCount)
             {
@@ -224,7 +224,7 @@ public sealed class DeathBagPlayer : ModPlayer
         {
             Item cursor = Main.mouseItem;
             bool isCopperTool = CopperTools.Contains(cursor.type);
-            bool isBagItem = cursor.ModItem is Items.DeathBagItem;
+            bool isBagItem = cursor.ModItem is Items.BagItemBase;
             if (!isCopperTool && !isBagItem)
             {
                 _deathSnapshot.Add((CursorSlotSentinel, cursor.Clone()));
@@ -235,7 +235,7 @@ public sealed class DeathBagPlayer : ModPlayer
 
         // Filter out copper tools and bag items — these are never worth bagging
         _deathSnapshot.RemoveAll(entry =>
-            CopperTools.Contains(entry.Item.type) || entry.Item.ModItem is Items.DeathBagItem);
+            CopperTools.Contains(entry.Item.type) || entry.Item.ModItem is Items.BagItemBase);
 
         Mod.Logger.Info($"[DeathBag] PreKill: snapshotted {_deathSnapshot.Count} items for {Player.name} (after filtering copper tools + bag items)");
 
@@ -252,7 +252,7 @@ public sealed class DeathBagPlayer : ModPlayer
             Main.mouseItem = new Item();
 
         // Clear inventory so vanilla's DropItems finds nothing to scatter —
-        // EXCEPT DeathBagItems (carried bags) and copper tools, which vanilla will drop naturally.
+        // EXCEPT carried bag items and copper tools, which vanilla will drop naturally.
         ClearInventory(preserveBagItems: true, preserveCopperTools: true);
 
         return true;
@@ -282,7 +282,7 @@ public sealed class DeathBagPlayer : ModPlayer
     /// </summary>
     public override bool CanSellItem(NPC npc, Item[] shopInventory, Item item)
     {
-        if (item?.ModItem is Items.DeathBagItem)
+        if (item?.ModItem is Items.BagItemBase)
             return false;
 
         return base.CanSellItem(npc, shopInventory, item);
@@ -296,10 +296,21 @@ public sealed class DeathBagPlayer : ModPlayer
         // Safety net: if a bag item ends up in the trash slot, drop it instead.
         // Runs at the start of the tick (before input processing) so there's no
         // window to interact with the bag while it's in the trash slot.
-        if (Player.trashItem?.ModItem is Items.DeathBagItem)
+        if (Player.trashItem?.ModItem is Items.BagItemBase)
         {
-            Player.QuickSpawnItem(Player.GetSource_Misc("DeathBagDrop"), Player.trashItem, Player.trashItem.stack);
-            Player.trashItem.TurnToAir();
+            if (Player.trashItem.ModItem is Items.OverflowBagItem)
+            {
+                Item trashBag = Player.trashItem.Clone();
+                Player.trashItem.TurnToAir();
+                Item remainder = Player.GetItem(Player.whoAmI, trashBag, GetItemSettings.InventoryEntityToPlayerInventorySettings);
+                if (remainder is not null && !remainder.IsAir)
+                    Player.QuickSpawnItem(Player.GetSource_Misc("DeathBagOverflowTrashEject"), remainder, remainder.stack);
+            }
+            else
+            {
+                Player.QuickSpawnItem(Player.GetSource_Misc("DeathBagDrop"), Player.trashItem, Player.trashItem.stack);
+                Player.trashItem.TurnToAir();
+            }
         }
     }
 
@@ -336,7 +347,7 @@ public sealed class DeathBagPlayer : ModPlayer
 
         var currentSnapshot = SnapshotInventory();
         currentSnapshot.RemoveAll(entry =>
-            CopperTools.Contains(entry.Item.type) || entry.Item.ModItem is Items.DeathBagItem);
+            CopperTools.Contains(entry.Item.type) || entry.Item.ModItem is Items.BagItemBase);
 
         Mod.Logger.Info($"[DeathBag] Current inventory snapshot: {currentSnapshot.Count} items (after filtering copper tools + bag items)");
 
@@ -344,8 +355,9 @@ public sealed class DeathBagPlayer : ModPlayer
         Item? loadoutBagItem = null;
         if (currentSnapshot.Count > 0)
         {
-            loadoutBagItem = CreateBagItem(BagKind.Overflow, currentSnapshot);
-            Mod.Logger.Info($"[DeathBag] Created overflow bag item with {currentSnapshot.Count} items");
+            BagKind displacedKind = bag.Kind == BagKind.Loadout ? BagKind.Loadout : BagKind.Overflow;
+            loadoutBagItem = CreateBagItem(displacedKind, currentSnapshot);
+            Mod.Logger.Info($"[DeathBag] Created {displacedKind} bag item with {currentSnapshot.Count} items");
         }
 
         // === 3. CLEAR inventory (preserving copper tools + bag items) ===
@@ -498,7 +510,7 @@ public sealed class DeathBagPlayer : ModPlayer
         {
             for (int i = 0; i < array.Length; i++)
             {
-                if (preserveBagItems && array[i]?.ModItem is Items.DeathBagItem)
+                if (preserveBagItems && array[i]?.ModItem is Items.BagItemBase)
                     continue;
                 if (preserveCopperTools && array[i] is not null && CopperTools.Contains(array[i].type))
                     continue;

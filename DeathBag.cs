@@ -139,7 +139,7 @@ public sealed class DeathBag : Mod
     private static bool IsMatchingBagItem(Item item, string ownerName, BagKind kind, int deathLoadoutIndex,
         string carrierName, List<(int SlotIndex, Item Item)> inventory)
     {
-        if (item?.ModItem is not DeathBagItem bagItem)
+        if (item?.ModItem is not BagItemBase bagItem)
             return false;
 
         if (bagItem.OwnerName != ownerName || bagItem.Kind != kind || bagItem.DeathLoadoutIndex != deathLoadoutIndex)
@@ -327,7 +327,7 @@ public sealed class DeathBag : Mod
             return;
 
         Player localPlayer = Main.LocalPlayer;
-        if (!DeathBagItem.TryResolvePendingPlacement(localPlayer, requestId, out DeathBagItem bagItem, out int currentSlot))
+        if (!BagItemBase.TryResolvePendingPlacement(localPlayer, requestId, out BagItemBase bagItem, out int currentSlot))
         {
             Logger.Error($"[DeathBag] Client: placement response {requestId} arrived but no pending bag item was found");
             Main.NewText("Bag placement finished, but the source item could not be found safely.", Microsoft.Xna.Framework.Color.Yellow);

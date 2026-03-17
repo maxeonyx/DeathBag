@@ -18,7 +18,7 @@ internal sealed class BagPayload
 
 internal static class BagPayloadHelper
 {
-    public static BagPayload FromItem(DeathBagItem bagItem)
+    public static BagPayload FromItem(BagItemBase bagItem)
     {
         return new BagPayload
         {
@@ -45,15 +45,14 @@ internal static class BagPayloadHelper
     public static Item CreateBagItem(BagPayload payload)
     {
         Item item = new();
-        item.SetDefaults(ModContent.ItemType<DeathBagItem>());
-        if (item.ModItem is DeathBagItem bagItem)
+        item.SetDefaults(GetItemType(payload.Kind));
+        if (item.ModItem is BagItemBase bagItem)
             ApplyToItem(bagItem, payload);
         return item;
     }
 
-    public static void ApplyToItem(DeathBagItem bagItem, BagPayload payload)
+    public static void ApplyToItem(BagItemBase bagItem, BagPayload payload)
     {
-        bagItem.Kind = payload.Kind;
         bagItem.OwnerName = payload.OwnerName;
         bagItem.DeathLoadoutIndex = payload.DeathLoadoutIndex;
         bagItem.CarrierName = payload.CarrierName;
@@ -61,6 +60,54 @@ internal static class BagPayloadHelper
 
         if (!string.IsNullOrEmpty(payload.OwnerName))
             bagItem.Item.SetNameOverride($"{payload.OwnerName}'s {DB.GetBagKindName(payload.Kind)}");
+    }
+
+    public static void ConvertItemInPlace(Item item, BagPayload payload)
+    {
+        item.SetDefaults(GetItemType(payload.Kind));
+        if (item.ModItem is not BagItemBase bagItem)
+            return;
+
+        ApplyToItem(bagItem, payload);
+    }
+
+    public static BagPayload ReadPayload(TagCompound tag)
+    {
+        return new BagPayload
+        {
+            Kind = tag.ContainsKey("kind") ? (BagKind)tag.GetByte("kind") : BagKind.Death,
+            OwnerName = tag.GetString("ownerName"),
+            DeathLoadoutIndex = tag.ContainsKey("deathLoadout") ? tag.GetInt("deathLoadout") : 0,
+            CarrierName = tag.ContainsKey("carrierName") ? tag.GetString("carrierName") : "",
+            SavedInventory = ReadSavedInventory(tag),
+        };
+    }
+
+    public static List<(int SlotIndex, Item Item)> ReadSavedInventory(TagCompound tag)
+    {
+        var savedInventory = new List<(int SlotIndex, Item Item)>();
+        if (!tag.ContainsKey("items"))
+            return savedInventory;
+
+        var itemList = tag.GetList<TagCompound>("items");
+        foreach (TagCompound itemTag in itemList)
+        {
+            int slot = itemTag.GetInt("slot");
+            Item item = ItemIO.Load(itemTag.GetCompound("item"));
+            savedInventory.Add((slot, item));
+        }
+
+        return savedInventory;
+    }
+
+    public static int GetItemType(BagKind kind)
+    {
+        return kind switch
+        {
+            BagKind.Loadout => ModContent.ItemType<LoadoutBagItem>(),
+            BagKind.Overflow => ModContent.ItemType<OverflowBagItem>(),
+            _ => ModContent.ItemType<PortableDeathBagItem>(),
+        };
     }
 
     public static void ApplyToNPC(DeathBagNPC bagNPC, BagPayload payload, int ownerPlayerIndex)

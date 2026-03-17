@@ -26,8 +26,10 @@ public sealed class DeathBagState : ModSystem
     /// </summary>
     private static void OnSellOrTrash(On_ItemSlot.orig_SellOrTrash orig, Item[] inv, int context, int slot)
     {
-        if (inv[slot]?.ModItem is DeathBagItem)
+        if (inv[slot]?.ModItem is BagItemBase)
         {
+            if (inv[slot].ModItem is OverflowBagItem)
+                return;
             DropBagItem(inv[slot]);
             inv[slot].TurnToAir();
             return;
