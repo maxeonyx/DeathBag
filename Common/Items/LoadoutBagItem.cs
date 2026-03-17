@@ -10,7 +10,9 @@ public sealed class LoadoutBagItem : BagItemBase
 
     public override BagKind Kind => BagKind.Loadout;
 
-    protected override bool CanPlaceInWorld => true;
+    protected override bool CanPlaceByUse => true;
+
+    protected override bool ConvertsToNPCWhenDropped => true;
 
     public override void SetDefaults()
     {

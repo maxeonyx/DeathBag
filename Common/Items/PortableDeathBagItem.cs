@@ -10,7 +10,9 @@ public sealed class PortableDeathBagItem : BagItemBase
 
     public override BagKind Kind => BagKind.Death;
 
-    protected override bool CanPlaceInWorld => true;
+    protected override bool CanPlaceByUse => true;
+
+    protected override bool ConvertsToNPCWhenDropped => true;
 
     public override void SetDefaults()
     {

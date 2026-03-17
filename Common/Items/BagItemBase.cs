@@ -26,7 +26,9 @@ public abstract class BagItemBase : ModItem
 
     public abstract BagKind Kind { get; }
 
-    protected virtual bool CanPlaceInWorld => false;
+    protected virtual bool CanPlaceByUse => false;
+
+    protected virtual bool ConvertsToNPCWhenDropped => false;
 
     public override void SetDefaults()
     {
@@ -110,15 +112,12 @@ public abstract class BagItemBase : ModItem
 
     public override bool CanPickup(Player player)
     {
-        if (Kind == BagKind.Overflow && player.name != OwnerName)
-            return false;
-
         return base.CanPickup(player);
     }
 
     public override void Update(ref float gravity, ref float maxFallSpeed)
     {
-        if (!CanPlaceInWorld || Main.netMode == NetmodeID.MultiplayerClient || SavedInventory.Count == 0)
+        if (!ConvertsToNPCWhenDropped || Main.netMode == NetmodeID.MultiplayerClient || SavedInventory.Count == 0)
             return;
 
         if (!SpawnBagNPCFromItem())
@@ -180,7 +179,7 @@ public abstract class BagItemBase : ModItem
 
     protected bool CanPlaceBag(Player player)
     {
-        if (!CanPlaceInWorld || SavedInventory.Count == 0 || _pendingPlacementRequestId != 0)
+        if (!CanPlaceByUse || SavedInventory.Count == 0 || _pendingPlacementRequestId != 0)
             return false;
 
         Vector2 mouseWorld = Main.MouseWorld;
@@ -232,7 +231,7 @@ public abstract class BagItemBase : ModItem
             return false;
         if (slot < 0 || slot >= SlotHelper.MainInventorySlotCount)
             return false;
-        if (!ReferenceEquals(player.inventory[slot]?.ModItem, this))
+        if (!ReferenceEquals(player.inventory[slot], Item))
             return false;
 
         DB.LogBagContents(Mod, "placed bag via left-click", OwnerName, Kind, SavedInventory);
@@ -262,13 +261,20 @@ public abstract class BagItemBase : ModItem
 
     protected int FindCurrentInventorySlot(Player player)
     {
+        int selectedSlot = player.selectedItem;
+        if (selectedSlot >= 0 && selectedSlot < SlotHelper.MainInventorySlotCount)
+        {
+            if (ReferenceEquals(player.inventory[selectedSlot], Item))
+                return selectedSlot;
+        }
+
         for (int i = 0; i < SlotHelper.MainInventorySlotCount; i++)
         {
-            if (ReferenceEquals(player.inventory[i]?.ModItem, this))
+            if (ReferenceEquals(player.inventory[i], Item))
                 return i;
         }
 
-        return -1;
+        return DB.FindMatchingBagItemSlot(player, OwnerName, Kind, DeathLoadoutIndex, CarrierName, SavedInventory);
     }
 
     private bool SpawnBagNPCFromItem()

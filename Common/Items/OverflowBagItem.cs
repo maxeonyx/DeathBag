@@ -9,10 +9,7 @@ public sealed class OverflowBagItem : BagItemBase
 
     public override BagKind Kind => BagKind.Overflow;
 
-    public override void UpdateInventory(Player player)
-    {
-        Item.favorited = true;
-    }
+    protected override bool ConvertsToNPCWhenDropped => true;
 
     public override bool CanUseItem(Player player)
     {
