@@ -59,13 +59,17 @@ public sealed class LoadoutStationTile : ModTile
         Player player = Main.LocalPlayer;
         var modPlayer = player.GetModPlayer<DeathBagPlayer>();
 
-        // Snapshot current inventory, excluding bag items and copper tools
+        // Snapshot current inventory, excluding bag items, copper tools, and coins
         var snapshot = modPlayer.SnapshotInventory();
         snapshot.RemoveAll(entry =>
             entry.Item.ModItem is BagItemBase
             || entry.Item.type == ItemID.CopperShortsword
             || entry.Item.type == ItemID.CopperPickaxe
-            || entry.Item.type == ItemID.CopperAxe);
+            || entry.Item.type == ItemID.CopperAxe
+            || entry.Item.type == ItemID.CopperCoin
+            || entry.Item.type == ItemID.SilverCoin
+            || entry.Item.type == ItemID.GoldCoin
+            || entry.Item.type == ItemID.PlatinumCoin);
 
         // Cursor item dupe safety: the cursor item is effectively an inventory slot in Terraria.
         // Don't include it in loadout station snapshots unless we can atomically clear it too.
