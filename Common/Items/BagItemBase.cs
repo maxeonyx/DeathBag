@@ -24,8 +24,6 @@ public abstract class BagItemBase : ModItem
     private static int _nextPlacementRequestId = 1;
 
     private bool _consumeAfterImmediatePlacement = true;
-    private int _pendingPlacementRequestId;
-    private BagPayload? _pendingPlacementPayload;
 
     public abstract BagKind Kind { get; }
 
@@ -74,7 +72,7 @@ public abstract class BagItemBase : ModItem
 
     public override bool CanRightClick()
     {
-        return _pendingPlacementRequestId == 0 && Main.LocalPlayer.name == OwnerName && SavedInventory.Count > 0;
+        return !Main.LocalPlayer.GetModPlayer<DeathBagPlayer>().HasPendingBagPlacement && Main.LocalPlayer.name == OwnerName && SavedInventory.Count > 0;
     }
 
     public override void RightClick(Player player)
@@ -167,7 +165,6 @@ public abstract class BagItemBase : ModItem
 
     public override void LoadData(TagCompound tag)
     {
-        CancelPendingPlacement();
         BagPayloadHelper.ApplyToItem(this, BagPayloadHelper.ReadPayload(tag));
     }
 
@@ -190,12 +187,11 @@ public abstract class BagItemBase : ModItem
             CarrierName = reader.ReadString(),
             SavedInventory = DB.ReadInventory(reader),
         });
-        CancelPendingPlacement();
     }
 
     protected bool CanPlaceBag(Player player)
     {
-        if (!CanPlaceByUse || SavedInventory.Count == 0 || _pendingPlacementRequestId != 0)
+        if (!CanPlaceByUse || SavedInventory.Count == 0 || player.GetModPlayer<DeathBagPlayer>().HasPendingBagPlacement)
             return false;
 
         Vector2 mouseWorld = Main.MouseWorld;
@@ -218,11 +214,11 @@ public abstract class BagItemBase : ModItem
                 Main.NewText("Could not safely place that bag right now.", Color.Yellow);
                 return false;
             }
-
-            _pendingPlacementRequestId = _nextPlacementRequestId++;
-            _pendingPlacementPayload = BagPayloadHelper.FromItem(this);
+            int requestId = _nextPlacementRequestId++;
+            BagPayload payload = BagPayloadHelper.FromItem(this);
+            player.GetModPlayer<DeathBagPlayer>().BeginPendingBagPlacement(requestId, sourceSlot, payload);
             _consumeAfterImmediatePlacement = false;
-            DB.SendPlaceBagItemRequest(Mod, _pendingPlacementRequestId, sourceSlot, spawnPos.X, spawnPos.Y, _pendingPlacementPayload);
+            DB.SendPlaceBagItemRequest(Mod, requestId, sourceSlot, spawnPos.X, spawnPos.Y, payload);
             return true;
         }
 
@@ -236,80 +232,9 @@ public abstract class BagItemBase : ModItem
         return true;
     }
 
-    internal void CancelPendingPlacement()
-    {
-        _pendingPlacementRequestId = 0;
-        _pendingPlacementPayload = null;
-        _consumeAfterImmediatePlacement = true;
-    }
-
-    internal bool TryConsumePendingPlacement(Player player, int slot)
-    {
-        if (_pendingPlacementRequestId == 0)
-            return false;
-        if (_pendingPlacementPayload is null)
-            return false;
-
-        if (slot == CursorSlotSentinel)
-        {
-            if (!DB.IsMatchingBagItem(Main.mouseItem, _pendingPlacementPayload))
-                return false;
-
-            DB.LogBagContents(Mod, "placed bag via left-click", OwnerName, Kind, SavedInventory);
-            Main.mouseItem = new Item();
-            CancelPendingPlacement();
-            return true;
-        }
-
-        if (slot < 0 || slot >= SlotHelper.MainInventorySlotCount)
-            return false;
-        if (!DB.IsMatchingBagItem(player.inventory[slot], _pendingPlacementPayload))
-            return false;
-
-        DB.LogBagContents(Mod, "placed bag via left-click", OwnerName, Kind, SavedInventory);
-        player.inventory[slot].TurnToAir();
-        CancelPendingPlacement();
-        return true;
-    }
-
-    internal static bool TryResolvePendingPlacement(Player player, int requestId, out BagItemBase bagItem, out int slot)
-    {
-        if (Main.mouseItem?.ModItem is BagItemBase mouseCandidate
-            && mouseCandidate._pendingPlacementRequestId == requestId
-            && mouseCandidate._pendingPlacementPayload is not null
-            && DB.IsMatchingBagItem(Main.mouseItem, mouseCandidate._pendingPlacementPayload))
-        {
-            bagItem = mouseCandidate;
-            slot = CursorSlotSentinel;
-            return true;
-        }
-
-        for (int i = 0; i < SlotHelper.MainInventorySlotCount; i++)
-        {
-            if (player.inventory[i]?.ModItem is not BagItemBase candidate)
-                continue;
-            if (candidate._pendingPlacementRequestId != requestId)
-                continue;
-
-            if (candidate._pendingPlacementPayload is null)
-                continue;
-
-            if (!DB.IsMatchingBagItem(player.inventory[i], candidate._pendingPlacementPayload))
-                continue;
-
-            bagItem = candidate;
-            slot = i;
-            return true;
-        }
-
-        bagItem = null;
-        slot = -1;
-        return false;
-    }
-
     protected int FindCurrentInventorySlot(Player player)
     {
-        BagPayload payload = _pendingPlacementPayload ?? BagPayloadHelper.FromItem(this);
+        BagPayload payload = BagPayloadHelper.FromItem(this);
 
         if (DB.IsMatchingBagItem(Main.mouseItem, payload))
             return CursorSlotSentinel;

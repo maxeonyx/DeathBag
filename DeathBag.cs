@@ -339,7 +339,8 @@ public sealed class DeathBag : Mod
             return;
 
         Player localPlayer = Main.LocalPlayer;
-        if (!BagItemBase.TryResolvePendingPlacement(localPlayer, requestId, out BagItemBase bagItem, out int currentSlot))
+        var modPlayer = localPlayer.GetModPlayer<Common.Players.DeathBagPlayer>();
+        if (!modPlayer.TryGetPendingBagPlacement(requestId, out var pendingPlacement))
         {
             Logger.Error($"[DeathBag] Client: placement response {requestId} arrived but no pending bag item was found");
             Main.NewText("Bag placement finished, but the source item could not be found safely.", Microsoft.Xna.Framework.Color.Yellow);
@@ -348,17 +349,21 @@ public sealed class DeathBag : Mod
 
         if (!success)
         {
-            bagItem.CancelPendingPlacement();
+            modPlayer.ClearPendingBagPlacement();
             Main.NewText("Could not place bag right now.", Microsoft.Xna.Framework.Color.Yellow);
             return;
         }
 
+        int currentSlot = pendingPlacement.SourceKind == Common.Players.DeathBagPlayer.PendingPlacementSourceKind.Cursor
+            ? -1
+            : pendingPlacement.SourceSlot;
         if (currentSlot != sourceSlot)
             Logger.Warn($"[DeathBag] Client: pending bag placement request {requestId} moved from slot {sourceSlot} to {currentSlot} before confirmation");
 
-        if (!bagItem.TryConsumePendingPlacement(localPlayer, currentSlot))
+        if (!modPlayer.TryConsumePendingBagPlacement(pendingPlacement))
         {
             Logger.Error($"[DeathBag] Client: failed to consume pending bag item for request {requestId} after confirmed placement");
+            modPlayer.ClearPendingBagPlacement();
             Main.NewText("Bag was placed, but the source item could not be consumed safely.", Microsoft.Xna.Framework.Color.Yellow);
             return;
         }

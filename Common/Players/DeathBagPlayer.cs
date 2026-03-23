@@ -16,6 +16,20 @@ public sealed class DeathBagPlayer : ModPlayer
     // This is not a real inventory slot, so restore code must handle it specially.
     private const int CursorSlotSentinel = -1;
 
+    internal enum PendingPlacementSourceKind : byte
+    {
+        InventorySlot = 0,
+        Cursor = 1,
+    }
+
+    internal sealed class PendingBagPlacement
+    {
+        public int RequestId;
+        public PendingPlacementSourceKind SourceKind;
+        public int SourceSlot;
+        public BagPayload Payload = new();
+    }
+
     /// <summary>
     /// Snapshot taken at moment of death, before vanilla drops items.
     /// Null when no snapshot is pending.
@@ -26,6 +40,73 @@ public sealed class DeathBagPlayer : ModPlayer
     /// Which loadout was active at time of death. Used to restore the correct loadout.
     /// </summary>
     private int _deathLoadoutIndex;
+
+    private PendingBagPlacement? _pendingBagPlacement;
+
+    internal bool HasPendingBagPlacement => _pendingBagPlacement is not null;
+
+    internal void BeginPendingBagPlacement(int requestId, int sourceSlot, BagPayload payload)
+    {
+        _pendingBagPlacement = new PendingBagPlacement
+        {
+            RequestId = requestId,
+            SourceKind = sourceSlot == CursorSlotSentinel ? PendingPlacementSourceKind.Cursor : PendingPlacementSourceKind.InventorySlot,
+            SourceSlot = sourceSlot,
+            Payload = new BagPayload
+            {
+                Kind = payload.Kind,
+                OwnerName = payload.OwnerName,
+                DeathLoadoutIndex = payload.DeathLoadoutIndex,
+                CarrierName = payload.CarrierName,
+                SavedInventory = DB.CloneInventory(payload.SavedInventory),
+            },
+        };
+    }
+
+    internal bool TryGetPendingBagPlacement(int requestId, out PendingBagPlacement pendingPlacement)
+    {
+        if (_pendingBagPlacement is not null && _pendingBagPlacement.RequestId == requestId)
+        {
+            pendingPlacement = _pendingBagPlacement;
+            return true;
+        }
+
+        pendingPlacement = null;
+        return false;
+    }
+
+    internal void ClearPendingBagPlacement()
+    {
+        _pendingBagPlacement = null;
+    }
+
+    internal bool TryConsumePendingBagPlacement(PendingBagPlacement pendingPlacement)
+    {
+        if (_pendingBagPlacement is null || !ReferenceEquals(_pendingBagPlacement, pendingPlacement))
+            return false;
+
+        bool consumed = pendingPlacement.SourceKind switch
+        {
+            PendingPlacementSourceKind.Cursor => DB.IsMatchingBagItem(Main.mouseItem, pendingPlacement.Payload),
+            PendingPlacementSourceKind.InventorySlot => pendingPlacement.SourceSlot >= 0
+                && pendingPlacement.SourceSlot < SlotHelper.MainInventorySlotCount
+                && DB.IsMatchingBagItem(Player.inventory[pendingPlacement.SourceSlot], pendingPlacement.Payload),
+            _ => false,
+        };
+
+        if (!consumed)
+            return false;
+
+        DB.LogBagContents(Mod, "placed bag via left-click", pendingPlacement.Payload.OwnerName, pendingPlacement.Payload.Kind, pendingPlacement.Payload.SavedInventory);
+
+        if (pendingPlacement.SourceKind == PendingPlacementSourceKind.Cursor)
+            Main.mouseItem = new Item();
+        else
+            Player.inventory[pendingPlacement.SourceSlot].TurnToAir();
+
+        ClearPendingBagPlacement();
+        return true;
+    }
 
     /// <summary>Copper starter tools — never worth bagging.</summary>
     private static readonly HashSet<int> CopperTools = new()
