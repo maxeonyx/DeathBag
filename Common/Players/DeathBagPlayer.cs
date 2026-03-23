@@ -42,7 +42,7 @@ public sealed class DeathBagPlayer : ModPlayer
     private int _deathLoadoutIndex;
 
     private PendingBagPlacement? _pendingBagPlacement;
-    private bool _logCursorPlacementStateNextTick;
+    private int _logCursorPlacementStateTicksRemaining;
 
     internal bool HasPendingBagPlacement => _pendingBagPlacement is not null;
 
@@ -137,7 +137,7 @@ public sealed class DeathBagPlayer : ModPlayer
             Main.mouseItem = new Item();
             Item slot58After = Player.inventory.Length > 58 ? Player.inventory[58] : null;
             Mod.Logger.Info($"[DeathBag] TryConsumePendingBagPlacement: after clear selectedItem={Player.selectedItem}, mouseType={Main.mouseItem?.type ?? -1}, mouseAir={Main.mouseItem?.IsAir != false}, mouseHash={Main.mouseItem?.GetHashCode() ?? 0}, slot58Type={slot58After?.type ?? -1}, slot58Air={slot58After?.IsAir != false}, slot58Hash={slot58After?.GetHashCode() ?? 0}");
-            _logCursorPlacementStateNextTick = true;
+            _logCursorPlacementStateTicksRemaining = 10;
         }
         else
         {
@@ -434,11 +434,11 @@ public sealed class DeathBagPlayer : ModPlayer
         if (Player.whoAmI != Main.myPlayer)
             return;
 
-        if (_logCursorPlacementStateNextTick)
+        if (_logCursorPlacementStateTicksRemaining > 0)
         {
             Item slot58Item = Player.inventory.Length > 58 ? Player.inventory[58] : null;
-            Mod.Logger.Info($"[DeathBag] Post-clear next tick: selectedItem={Player.selectedItem}, mouseType={Main.mouseItem?.type ?? -1}, mouseAir={Main.mouseItem?.IsAir != false}, mouseHash={Main.mouseItem?.GetHashCode() ?? 0}, slot58Type={slot58Item?.type ?? -1}, slot58Air={slot58Item?.IsAir != false}, slot58Hash={slot58Item?.GetHashCode() ?? 0}");
-            _logCursorPlacementStateNextTick = false;
+            Mod.Logger.Info($"[DeathBag] Post-clear tick: ticksRemaining={_logCursorPlacementStateTicksRemaining}, selectedItem={Player.selectedItem}, mouseType={Main.mouseItem?.type ?? -1}, mouseAir={Main.mouseItem?.IsAir != false}, mouseHash={Main.mouseItem?.GetHashCode() ?? 0}, slot58Type={slot58Item?.type ?? -1}, slot58Air={slot58Item?.IsAir != false}, slot58Hash={slot58Item?.GetHashCode() ?? 0}");
+            _logCursorPlacementStateTicksRemaining--;
         }
 
         // Safety net: if a bag item ends up in the trash slot, drop it instead.

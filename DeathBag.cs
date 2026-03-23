@@ -373,8 +373,16 @@ public sealed class DeathBag : Mod
             return;
         }
 
+        Logger.Info($"[DeathBag] Client: post-consume sync decision requestId={requestId}, currentSlot={currentSlot}, sourceSlot={sourceSlot}, sourceKind={pendingPlacement.SourceKind}, willSendSyncEquipment={(currentSlot >= 0)}");
         if (currentSlot >= 0)
+        {
+            Logger.Info($"[DeathBag] Client: sending SyncEquipment for slot {currentSlot} after placement requestId={requestId}");
             NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, localPlayer.whoAmI, currentSlot);
+        }
+        else
+        {
+            Logger.Warn($"[DeathBag] Client: no SyncEquipment sent after cursor placement requestId={requestId}; cursor/slot58 state is local-only right now");
+        }
     }
 
     /// <summary>
