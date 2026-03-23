@@ -109,7 +109,10 @@ public abstract class BagItemBase : ModItem
     public override bool ConsumeItem(Player player)
     {
         bool shouldConsume = SavedInventory.Count == 0 || _consumeAfterImmediatePlacement;
-        Mod.Logger.Info($"[DeathBag] ConsumeItem: netMode={Main.netMode}, shouldConsume={shouldConsume}, consumeAfterImmediatePlacement={_consumeAfterImmediatePlacement}, savedInventoryCount={SavedInventory.Count}, itemHash={Item.GetHashCode()}, modHash={GetHashCode()}, pending={player.GetModPlayer<DeathBagPlayer>().DescribePendingBagPlacement()}");
+        Item mouseItem = Main.mouseItem;
+        Item slot58Item = player.inventory.Length > 58 ? player.inventory[58] : null;
+        bool sameAsMouse = ReferenceEquals(Item, mouseItem);
+        Mod.Logger.Info($"[DeathBag] ConsumeItem: netMode={Main.netMode}, itemHash={Item.GetHashCode()}, modHash={GetHashCode()}, selectedItem={player.selectedItem}, mouseType={mouseItem?.type ?? -1}, mouseAir={mouseItem?.IsAir != false}, mouseHash={mouseItem?.GetHashCode() ?? 0}, slot58Type={slot58Item?.type ?? -1}, slot58Air={slot58Item?.IsAir != false}, slot58Hash={slot58Item?.GetHashCode() ?? 0}, sameAsMouse={sameAsMouse}, shouldConsume={shouldConsume}, reasonSavedInventoryEmpty={SavedInventory.Count == 0}, reasonConsumeAfterImmediatePlacement={_consumeAfterImmediatePlacement}, pending={player.GetModPlayer<DeathBagPlayer>().DescribePendingBagPlacement()}");
         return shouldConsume;
     }
 
