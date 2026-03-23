@@ -14,6 +14,8 @@ namespace DeathBag.Common.Items;
 
 public abstract class BagItemBase : ModItem
 {
+    internal const int CursorSlotSentinel = -1;
+
     public string OwnerName = "";
     public int DeathLoadoutIndex;
     public string CarrierName = "";
@@ -210,7 +212,7 @@ public abstract class BagItemBase : ModItem
         if (Main.netMode == NetmodeID.MultiplayerClient)
         {
             int sourceSlot = FindCurrentInventorySlot(player);
-            if (sourceSlot < 0)
+            if (sourceSlot < CursorSlotSentinel)
             {
                 Mod.Logger.Error("[DeathBag] Refused multiplayer bag placement because the source inventory slot could not be identified");
                 Main.NewText("Could not safely place that bag right now.", Color.Yellow);
@@ -245,9 +247,21 @@ public abstract class BagItemBase : ModItem
     {
         if (_pendingPlacementRequestId == 0)
             return false;
-        if (slot < 0 || slot >= SlotHelper.MainInventorySlotCount)
-            return false;
         if (_pendingPlacementPayload is null)
+            return false;
+
+        if (slot == CursorSlotSentinel)
+        {
+            if (!DB.IsMatchingBagItem(Main.mouseItem, _pendingPlacementPayload))
+                return false;
+
+            DB.LogBagContents(Mod, "placed bag via left-click", OwnerName, Kind, SavedInventory);
+            Main.mouseItem.TurnToAir();
+            CancelPendingPlacement();
+            return true;
+        }
+
+        if (slot < 0 || slot >= SlotHelper.MainInventorySlotCount)
             return false;
         if (!DB.IsMatchingBagItem(player.inventory[slot], _pendingPlacementPayload))
             return false;
@@ -260,6 +274,16 @@ public abstract class BagItemBase : ModItem
 
     internal static bool TryResolvePendingPlacement(Player player, int requestId, out BagItemBase bagItem, out int slot)
     {
+        if (Main.mouseItem?.ModItem is BagItemBase mouseCandidate
+            && mouseCandidate._pendingPlacementRequestId == requestId
+            && mouseCandidate._pendingPlacementPayload is not null
+            && DB.IsMatchingBagItem(Main.mouseItem, mouseCandidate._pendingPlacementPayload))
+        {
+            bagItem = mouseCandidate;
+            slot = CursorSlotSentinel;
+            return true;
+        }
+
         for (int i = 0; i < SlotHelper.MainInventorySlotCount; i++)
         {
             if (player.inventory[i]?.ModItem is not BagItemBase candidate)
@@ -286,6 +310,9 @@ public abstract class BagItemBase : ModItem
     protected int FindCurrentInventorySlot(Player player)
     {
         BagPayload payload = _pendingPlacementPayload ?? BagPayloadHelper.FromItem(this);
+
+        if (DB.IsMatchingBagItem(Main.mouseItem, payload))
+            return CursorSlotSentinel;
 
         int matchedSelectedSlot = FindMatchingInventorySlot(player, player.selectedItem, payload);
         if (matchedSelectedSlot >= 0)

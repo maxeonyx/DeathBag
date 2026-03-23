@@ -363,7 +363,8 @@ public sealed class DeathBag : Mod
             return;
         }
 
-        NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, localPlayer.whoAmI, currentSlot);
+        if (currentSlot >= 0)
+            NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, localPlayer.whoAmI, currentSlot);
     }
 
     /// <summary>
