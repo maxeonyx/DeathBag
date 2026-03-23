@@ -45,6 +45,14 @@ public sealed class DeathBagPlayer : ModPlayer
 
     internal bool HasPendingBagPlacement => _pendingBagPlacement is not null;
 
+    internal string DescribePendingBagPlacement()
+    {
+        if (_pendingBagPlacement is null)
+            return "none";
+
+        return $"requestId={_pendingBagPlacement.RequestId}, sourceKind={_pendingBagPlacement.SourceKind}, sourceSlot={_pendingBagPlacement.SourceSlot}, owner={_pendingBagPlacement.Payload.OwnerName}, kind={_pendingBagPlacement.Payload.Kind}, items={_pendingBagPlacement.Payload.SavedInventory.Count}";
+    }
+
     internal void BeginPendingBagPlacement(int requestId, int sourceSlot, BagPayload payload)
     {
         _pendingBagPlacement = new PendingBagPlacement
@@ -61,29 +69,48 @@ public sealed class DeathBagPlayer : ModPlayer
                 SavedInventory = DB.CloneInventory(payload.SavedInventory),
             },
         };
+
+        Mod.Logger.Info($"[DeathBag] BeginPendingBagPlacement: {DescribePendingBagPlacement()}");
     }
 
     internal bool TryGetPendingBagPlacement(int requestId, out PendingBagPlacement pendingPlacement)
     {
+        Mod.Logger.Info($"[DeathBag] TryGetPendingBagPlacement: requestId={requestId}, current={DescribePendingBagPlacement()}");
         if (_pendingBagPlacement is not null && _pendingBagPlacement.RequestId == requestId)
         {
             pendingPlacement = _pendingBagPlacement;
+            Mod.Logger.Info($"[DeathBag] TryGetPendingBagPlacement: matched requestId={requestId}");
             return true;
         }
 
         pendingPlacement = null;
+        Mod.Logger.Warn($"[DeathBag] TryGetPendingBagPlacement: no match for requestId={requestId}");
         return false;
     }
 
     internal void ClearPendingBagPlacement()
     {
+        Mod.Logger.Info($"[DeathBag] ClearPendingBagPlacement: clearing {DescribePendingBagPlacement()}");
         _pendingBagPlacement = null;
     }
 
     internal bool TryConsumePendingBagPlacement(PendingBagPlacement pendingPlacement)
     {
+        Mod.Logger.Info($"[DeathBag] TryConsumePendingBagPlacement: requested={pendingPlacement?.RequestId.ToString() ?? "null"}, current={DescribePendingBagPlacement()}");
         if (_pendingBagPlacement is null || !ReferenceEquals(_pendingBagPlacement, pendingPlacement))
+        {
+            Mod.Logger.Warn("[DeathBag] TryConsumePendingBagPlacement: pending placement missing or not the same instance");
             return false;
+        }
+
+        Item sourceItem = pendingPlacement.SourceKind == PendingPlacementSourceKind.Cursor
+            ? Main.mouseItem
+            : (pendingPlacement.SourceSlot >= 0 && pendingPlacement.SourceSlot < SlotHelper.MainInventorySlotCount
+                ? Player.inventory[pendingPlacement.SourceSlot]
+                : null);
+        int sourceHash = sourceItem is null ? 0 : sourceItem.GetHashCode();
+        int sourceModHash = sourceItem?.ModItem is null ? 0 : sourceItem.ModItem.GetHashCode();
+        Mod.Logger.Info($"[DeathBag] TryConsumePendingBagPlacement: sourceKind={pendingPlacement.SourceKind}, sourceSlot={pendingPlacement.SourceSlot}, sourceItemType={sourceItem?.type ?? -1}, sourceItemAir={sourceItem?.IsAir != false}, sourceItemHash={sourceHash}, sourceModHash={sourceModHash}");
 
         bool consumed = pendingPlacement.SourceKind switch
         {
@@ -94,15 +121,23 @@ public sealed class DeathBagPlayer : ModPlayer
             _ => false,
         };
 
+        Mod.Logger.Info($"[DeathBag] TryConsumePendingBagPlacement: payloadMatch={consumed}");
+
         if (!consumed)
             return false;
 
         DB.LogBagContents(Mod, "placed bag via left-click", pendingPlacement.Payload.OwnerName, pendingPlacement.Payload.Kind, pendingPlacement.Payload.SavedInventory);
 
         if (pendingPlacement.SourceKind == PendingPlacementSourceKind.Cursor)
+        {
+            Mod.Logger.Info($"[DeathBag] TryConsumePendingBagPlacement: clearing cursor item hash={sourceHash}, modHash={sourceModHash}");
             Main.mouseItem = new Item();
+        }
         else
+        {
+            Mod.Logger.Info($"[DeathBag] TryConsumePendingBagPlacement: clearing inventory slot {pendingPlacement.SourceSlot} item hash={sourceHash}, modHash={sourceModHash}");
             Player.inventory[pendingPlacement.SourceSlot].TurnToAir();
+        }
 
         ClearPendingBagPlacement();
         return true;

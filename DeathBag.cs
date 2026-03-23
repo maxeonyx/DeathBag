@@ -310,7 +310,10 @@ public sealed class DeathBag : Mod
         if (Main.netMode != NetmodeID.Server)
             return;
 
+        Logger.Info($"[DeathBag] Server: HandlePlaceBagItemRequest requestId={requestId}, sourceSlot={sourceSlot}, owner={payload.OwnerName}, kind={payload.Kind}, items={payload.SavedInventory.Count}, spawn=({x:F1},{y:F1}), fromPlayer={whoAmI}");
+
         bool success = TrySpawnBagNPC(x, y, payload, ownerPlayerIndex: -1, Terraria.Entity.GetSource_NaturalSpawn(), out int npcIndex);
+        Logger.Info($"[DeathBag] Server: HandlePlaceBagItemRequest result requestId={requestId}, success={success}, npcIndex={npcIndex}");
 
         var response = GetPacket();
         response.Write((byte)MessageType.PlaceBagItemResponse);
@@ -340,6 +343,7 @@ public sealed class DeathBag : Mod
 
         Player localPlayer = Main.LocalPlayer;
         var modPlayer = localPlayer.GetModPlayer<Common.Players.DeathBagPlayer>();
+        Logger.Info($"[DeathBag] Client: HandlePlaceBagItemResponse requestId={requestId}, success={success}, sourceSlot={sourceSlot}, pending={modPlayer.DescribePendingBagPlacement()}, mouseItemHash={Main.mouseItem?.GetHashCode() ?? 0}, mouseModHash={Main.mouseItem?.ModItem?.GetHashCode() ?? 0}");
         if (!modPlayer.TryGetPendingBagPlacement(requestId, out var pendingPlacement))
         {
             Logger.Error($"[DeathBag] Client: placement response {requestId} arrived but no pending bag item was found");
@@ -357,6 +361,7 @@ public sealed class DeathBag : Mod
         int currentSlot = pendingPlacement.SourceKind == Common.Players.DeathBagPlayer.PendingPlacementSourceKind.Cursor
             ? -1
             : pendingPlacement.SourceSlot;
+        Logger.Info($"[DeathBag] Client: HandlePlaceBagItemResponse resolved currentSlot={currentSlot}, sourceKind={pendingPlacement.SourceKind}, pendingRequestId={pendingPlacement.RequestId}");
         if (currentSlot != sourceSlot)
             Logger.Warn($"[DeathBag] Client: pending bag placement request {requestId} moved from slot {sourceSlot} to {currentSlot} before confirmation");
 

@@ -108,18 +108,24 @@ public abstract class BagItemBase : ModItem
 
     public override bool ConsumeItem(Player player)
     {
-        return SavedInventory.Count == 0 || _consumeAfterImmediatePlacement;
+        bool shouldConsume = SavedInventory.Count == 0 || _consumeAfterImmediatePlacement;
+        Mod.Logger.Info($"[DeathBag] ConsumeItem: netMode={Main.netMode}, shouldConsume={shouldConsume}, consumeAfterImmediatePlacement={_consumeAfterImmediatePlacement}, savedInventoryCount={SavedInventory.Count}, itemHash={Item.GetHashCode()}, modHash={GetHashCode()}, pending={player.GetModPlayer<DeathBagPlayer>().DescribePendingBagPlacement()}");
+        return shouldConsume;
     }
 
     public override bool CanUseItem(Player player)
     {
-        return CanPlaceByUse && CanPlaceBag(player);
+        bool canUse = CanPlaceByUse && CanPlaceBag(player);
+        Mod.Logger.Info($"[DeathBag] CanUseItem: canUse={canUse}, canPlaceByUse={CanPlaceByUse}, itemHash={Item.GetHashCode()}, modHash={GetHashCode()}, pending={player.GetModPlayer<DeathBagPlayer>().DescribePendingBagPlacement()}, mouseItemHash={Main.mouseItem?.GetHashCode() ?? 0}, mouseModHash={Main.mouseItem?.ModItem?.GetHashCode() ?? 0}");
+        return canUse;
     }
 
     public override bool? UseItem(Player player)
     {
         if (!CanPlaceByUse)
             return base.UseItem(player);
+
+        Mod.Logger.Info($"[DeathBag] UseItem: netMode={Main.netMode}, itemHash={Item.GetHashCode()}, modHash={GetHashCode()}, mouseItemHash={Main.mouseItem?.GetHashCode() ?? 0}, mouseModHash={Main.mouseItem?.ModItem?.GetHashCode() ?? 0}, pendingBefore={player.GetModPlayer<DeathBagPlayer>().DescribePendingBagPlacement()}");
 
         return PlaceBag(player);
     }
@@ -191,23 +197,31 @@ public abstract class BagItemBase : ModItem
 
     protected bool CanPlaceBag(Player player)
     {
-        if (!CanPlaceByUse || SavedInventory.Count == 0 || player.GetModPlayer<DeathBagPlayer>().HasPendingBagPlacement)
+        var modPlayer = player.GetModPlayer<DeathBagPlayer>();
+        if (!CanPlaceByUse || SavedInventory.Count == 0 || modPlayer.HasPendingBagPlacement)
+        {
+            Mod.Logger.Info($"[DeathBag] CanPlaceBag: blocked netMode={Main.netMode}, canPlaceByUse={CanPlaceByUse}, savedInventoryCount={SavedInventory.Count}, hasPending={modPlayer.HasPendingBagPlacement}, pending={modPlayer.DescribePendingBagPlacement()}, itemHash={Item.GetHashCode()}, modHash={GetHashCode()}");
             return false;
+        }
 
         Vector2 mouseWorld = Main.MouseWorld;
         float dist = Vector2.Distance(player.Center, mouseWorld);
         float maxRange = Player.tileRangeX * 16f;
-        return dist <= maxRange;
+        bool inRange = dist <= maxRange;
+        Mod.Logger.Info($"[DeathBag] CanPlaceBag: allowedCheck netMode={Main.netMode}, inRange={inRange}, dist={dist:F1}, maxRange={maxRange:F1}, itemHash={Item.GetHashCode()}, modHash={GetHashCode()}, pending={modPlayer.DescribePendingBagPlacement()}");
+        return inRange;
     }
 
     protected bool? PlaceBag(Player player)
     {
         Vector2 mouseWorld = Main.MouseWorld;
         Vector2 spawnPos = new(mouseWorld.X, mouseWorld.Y + 24f);
+        Mod.Logger.Info($"[DeathBag] PlaceBag: start netMode={Main.netMode}, spawnPos=({spawnPos.X:F1},{spawnPos.Y:F1}), itemHash={Item.GetHashCode()}, modHash={GetHashCode()}, mouseItemHash={Main.mouseItem?.GetHashCode() ?? 0}, mouseModHash={Main.mouseItem?.ModItem?.GetHashCode() ?? 0}, pendingBefore={player.GetModPlayer<DeathBagPlayer>().DescribePendingBagPlacement()}");
 
         if (Main.netMode == NetmodeID.MultiplayerClient)
         {
             int sourceSlot = FindCurrentInventorySlot(player);
+            Mod.Logger.Info($"[DeathBag] PlaceBag: multiplayer sourceSlot={sourceSlot}, sourceKind={(sourceSlot == CursorSlotSentinel ? "Cursor" : "Inventory")}, itemHash={Item.GetHashCode()}, modHash={GetHashCode()}");
             if (sourceSlot < CursorSlotSentinel)
             {
                 Mod.Logger.Error("[DeathBag] Refused multiplayer bag placement because the source inventory slot could not be identified");
@@ -216,6 +230,7 @@ public abstract class BagItemBase : ModItem
             }
             int requestId = _nextPlacementRequestId++;
             BagPayload payload = BagPayloadHelper.FromItem(this);
+            Mod.Logger.Info($"[DeathBag] PlaceBag: creating pending placement requestId={requestId}, sourceSlot={sourceSlot}, sourceKind={(sourceSlot == CursorSlotSentinel ? "Cursor" : "Inventory")}, payloadOwner={payload.OwnerName}, payloadKind={payload.Kind}, payloadItems={payload.SavedInventory.Count}, itemHash={Item.GetHashCode()}, modHash={GetHashCode()}");
             player.GetModPlayer<DeathBagPlayer>().BeginPendingBagPlacement(requestId, sourceSlot, payload);
             _consumeAfterImmediatePlacement = false;
             DB.SendPlaceBagItemRequest(Mod, requestId, sourceSlot, spawnPos.X, spawnPos.Y, payload);
@@ -235,15 +250,24 @@ public abstract class BagItemBase : ModItem
     protected int FindCurrentInventorySlot(Player player)
     {
         BagPayload payload = BagPayloadHelper.FromItem(this);
+        Mod.Logger.Info($"[DeathBag] FindCurrentInventorySlot: start itemHash={Item.GetHashCode()}, modHash={GetHashCode()}, selectedItem={player.selectedItem}, mouseItemHash={Main.mouseItem?.GetHashCode() ?? 0}, mouseModHash={Main.mouseItem?.ModItem?.GetHashCode() ?? 0}");
 
         if (DB.IsMatchingBagItem(Main.mouseItem, payload))
+        {
+            Mod.Logger.Info($"[DeathBag] FindCurrentInventorySlot: matched cursor itemHash={Main.mouseItem?.GetHashCode() ?? 0}, mouseModHash={Main.mouseItem?.ModItem?.GetHashCode() ?? 0}");
             return CursorSlotSentinel;
+        }
 
         int matchedSelectedSlot = FindMatchingInventorySlot(player, player.selectedItem, payload);
         if (matchedSelectedSlot >= 0)
+        {
+            Mod.Logger.Info($"[DeathBag] FindCurrentInventorySlot: matched selected slot {matchedSelectedSlot}, itemHash={player.inventory[matchedSelectedSlot]?.GetHashCode() ?? 0}, modHash={player.inventory[matchedSelectedSlot]?.ModItem?.GetHashCode() ?? 0}");
             return matchedSelectedSlot;
+        }
 
-        return DB.FindMatchingBagItemSlot(player, payload);
+        int matchedSlot = DB.FindMatchingBagItemSlot(player, payload);
+        Mod.Logger.Info($"[DeathBag] FindCurrentInventorySlot: fallback matched slot {matchedSlot}");
+        return matchedSlot;
     }
 
     private static int FindMatchingInventorySlot(Player player, int slot, BagPayload payload)
