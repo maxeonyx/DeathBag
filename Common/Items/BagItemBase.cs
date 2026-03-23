@@ -256,7 +256,7 @@ public abstract class BagItemBase : ModItem
                 return false;
 
             DB.LogBagContents(Mod, "placed bag via left-click", OwnerName, Kind, SavedInventory);
-            Main.mouseItem.TurnToAir();
+            Main.mouseItem = new Item();
             CancelPendingPlacement();
             return true;
         }
