@@ -15,6 +15,8 @@ public sealed class DeathBagPlayer : ModPlayer
     // Sentinel slot index used to represent the cursor item (Main.mouseItem).
     // This is not a real inventory slot, so restore code must handle it specially.
     private const int CursorSlotSentinel = -1;
+    // Terraria uses player.inventory[58] as the authoritative selected-item slot
+    // when an item is held on the cursor; Main.mouseItem is just the UI copy.
     internal const int CursorInventorySlot = 58;
 
     internal enum PendingPlacementSourceKind : byte

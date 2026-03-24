@@ -73,9 +73,7 @@ public sealed class LoadoutStationTile : ModTile
 
         // Cursor item dupe safety: the cursor item is effectively an inventory slot in Terraria.
         // Don't include it in loadout station snapshots unless we can atomically clear it too.
-        // Slot 58 is the cursor/held-item slot.
-        const int cursorSlotIndex = 58;
-        bool removedCursorSlot = snapshot.RemoveAll(entry => entry.SlotIndex == cursorSlotIndex) > 0;
+        bool removedCursorSlot = snapshot.RemoveAll(entry => entry.SlotIndex == DeathBagPlayer.CursorInventorySlot) > 0;
         if (removedCursorSlot)
             Mod.Logger.Info("[DeathBag] Loadout station: excluded cursor slot (58) from snapshot to prevent dupe");
 
