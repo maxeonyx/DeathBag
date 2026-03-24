@@ -1,0 +1,19 @@
+[h1]v1.0 — Item Type Split & Quality of Life[/h1]
+
+[b]New: Coins stay with player[/b]
+Coins are no longer captured in death bags. They stay in your inventory on death (vanilla mediumcore scatters them as normal). Coins are also excluded from loadout station snapshots and preserved through bag restores.
+
+[b]New: Separate bag item types[/b]
+Death bags, loadout bags, and overflow bags are now distinct item types with their own icons. No more wrong-texture glitches during quick-stack animations.
+
+[b]Improved: Overflow bags[/b]
+Overflow bags (the junk from a restore) can no longer be left-click placed in the world. You can still right-click to empty them or drop them (they convert to an NPC on the ground as a safety net).
+
+[b]Improved: Restore creates correct bag kinds[/b]
+When restoring a death bag, your displaced current inventory now correctly becomes a Loadout bag — not an overflow bag.
+
+[b]Fixed: Multiplayer bag placement[/b]
+Left-click bag placement is now server-confirmed. Previously it could race and lose inventory data in multiplayer. Cursor-held bag placement also works correctly now.
+
+[b]Under the hood[/b]
+Centralized bag construction, content-based item matching, cleaner slot handling, and proper mod unload cleanup.
