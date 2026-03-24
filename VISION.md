@@ -211,7 +211,8 @@ When restoring a death bag, the player's current inventory (the scrappy stuff th
 
 **Key requirements:**
 - Current inventory -> bag item in inventory
-- Overflow bags should never drop on the ground; if one would otherwise be created with no room, prefer ordinary inventory/void-bag absorption for displaced junk first, and if the player later dies carrying an overflow bag, its contents should fold back into the new death bag rather than persisting as a separate bag layer
+- Overflow bags should never drop on the ground; if one would otherwise be created with no room, prefer ordinary inventory/void-bag absorption for displaced junk first
+- Overflow bags are conceptually part of the player's current inventory — whenever inventory is captured (on death OR at the loadout station), overflow bag contents should be absorbed into the new bag rather than persisting as a separate nested bag. They should not appear as a separate bag-within-a-bag.
 - The junk/overflow bag needs a right-click-in-inventory mechanic to open it without triggering a full restore (dump contents into inventory normally)
 - This is distinct from the loadout bag restore flow -- overflow bags are disposable junk bags, not saved loadouts
 

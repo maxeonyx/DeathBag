@@ -108,6 +108,18 @@ Extract a single `SlotHelper` utility with slot constants and a generic mapping 
 
 Bag items/NPCs are constructed with field-by-field setup in 4+ places. Extract a `BagFactory` or similar helper for one-line bag creation.
 
+## TODO: Cursor-Awareness Gaps in SnapshotInventory
+
+`SnapshotInventory()` does not read `Main.mouseItem`. The death path compensates for this explicitly, but other callers (restore carryover, loadout station) are still cursor-blind. Related gaps:
+- Restore overflow compaction (`FindExistingOverflowBag`) ignores an overflow bag on the cursor
+- Legacy item migration sweep doesn't inspect `Main.mouseItem`
+
+None of these are data-loss bugs today, but they're the most likely place for cursor-related issues to surface as new features are added.
+
+## TODO: Drop-and-snap duplication when standing on partner
+
+When your partner drops your death bag item back to you while you're standing directly on top of them, you can end up with both the restored inventory AND a copy of the bag. The likely cause: the dropped item converts to a bag NPC, AND the ground item gets picked up by the player, so the bag contents end up in two places. Need to prevent the double-acquisition — either suppress the magnet/auto-pickup during the item→NPC conversion window, or prevent the ground item from being picked up if the NPC conversion is going to happen.
+
 ## TODO: Full-Fidelity Bag Packet Serialization
 
 Current multiplayer bag sync uses a lossy inventory codec (`type`, `stack`, `prefix`, `favorited`) instead of full `ItemIO`-equivalent serialization. This is risky for modded items and any item state beyond the basic fields.
