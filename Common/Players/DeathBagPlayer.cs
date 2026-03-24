@@ -15,6 +15,7 @@ public sealed class DeathBagPlayer : ModPlayer
     // Sentinel slot index used to represent the cursor item (Main.mouseItem).
     // This is not a real inventory slot, so restore code must handle it specially.
     private const int CursorSlotSentinel = -1;
+    internal const int CursorInventorySlot = 58;
 
     internal enum PendingPlacementSourceKind : byte
     {
@@ -42,17 +43,8 @@ public sealed class DeathBagPlayer : ModPlayer
     private int _deathLoadoutIndex;
 
     private PendingBagPlacement? _pendingBagPlacement;
-    private int _logCursorPlacementStateTicksRemaining;
 
     internal bool HasPendingBagPlacement => _pendingBagPlacement is not null;
-
-    internal string DescribePendingBagPlacement()
-    {
-        if (_pendingBagPlacement is null)
-            return "none";
-
-        return $"requestId={_pendingBagPlacement.RequestId}, sourceKind={_pendingBagPlacement.SourceKind}, sourceSlot={_pendingBagPlacement.SourceSlot}, owner={_pendingBagPlacement.Payload.OwnerName}, kind={_pendingBagPlacement.Payload.Kind}, items={_pendingBagPlacement.Payload.SavedInventory.Count}";
-    }
 
     internal void BeginPendingBagPlacement(int requestId, int sourceSlot, BagPayload payload)
     {
@@ -70,59 +62,45 @@ public sealed class DeathBagPlayer : ModPlayer
                 SavedInventory = DB.CloneInventory(payload.SavedInventory),
             },
         };
-
-        Mod.Logger.Info($"[DeathBag] BeginPendingBagPlacement: {DescribePendingBagPlacement()}");
     }
 
     internal bool TryGetPendingBagPlacement(int requestId, out PendingBagPlacement pendingPlacement)
     {
-        Mod.Logger.Info($"[DeathBag] TryGetPendingBagPlacement: requestId={requestId}, current={DescribePendingBagPlacement()}");
         if (_pendingBagPlacement is not null && _pendingBagPlacement.RequestId == requestId)
         {
             pendingPlacement = _pendingBagPlacement;
-            Mod.Logger.Info($"[DeathBag] TryGetPendingBagPlacement: matched requestId={requestId}");
             return true;
         }
 
         pendingPlacement = null;
-        Mod.Logger.Warn($"[DeathBag] TryGetPendingBagPlacement: no match for requestId={requestId}");
         return false;
     }
 
     internal void ClearPendingBagPlacement()
     {
-        Mod.Logger.Info($"[DeathBag] ClearPendingBagPlacement: clearing {DescribePendingBagPlacement()}");
         _pendingBagPlacement = null;
     }
 
     internal bool TryConsumePendingBagPlacement(PendingBagPlacement pendingPlacement)
     {
-        Mod.Logger.Info($"[DeathBag] TryConsumePendingBagPlacement: requested={pendingPlacement?.RequestId.ToString() ?? "null"}, current={DescribePendingBagPlacement()}");
         if (_pendingBagPlacement is null || !ReferenceEquals(_pendingBagPlacement, pendingPlacement))
-        {
-            Mod.Logger.Warn("[DeathBag] TryConsumePendingBagPlacement: pending placement missing or not the same instance");
             return false;
-        }
 
         Item sourceItem = pendingPlacement.SourceKind == PendingPlacementSourceKind.Cursor
-            ? Main.mouseItem
+            ? (Player.inventory.Length > CursorInventorySlot ? Player.inventory[CursorInventorySlot] : null)
             : (pendingPlacement.SourceSlot >= 0 && pendingPlacement.SourceSlot < SlotHelper.MainInventorySlotCount
                 ? Player.inventory[pendingPlacement.SourceSlot]
                 : null);
-        int sourceHash = sourceItem is null ? 0 : sourceItem.GetHashCode();
-        int sourceModHash = sourceItem?.ModItem is null ? 0 : sourceItem.ModItem.GetHashCode();
-        Mod.Logger.Info($"[DeathBag] TryConsumePendingBagPlacement: sourceKind={pendingPlacement.SourceKind}, sourceSlot={pendingPlacement.SourceSlot}, sourceItemType={sourceItem?.type ?? -1}, sourceItemAir={sourceItem?.IsAir != false}, sourceItemHash={sourceHash}, sourceModHash={sourceModHash}");
 
         bool consumed = pendingPlacement.SourceKind switch
         {
-            PendingPlacementSourceKind.Cursor => DB.IsMatchingBagItem(Main.mouseItem, pendingPlacement.Payload),
+            PendingPlacementSourceKind.Cursor => sourceItem is not null
+                && DB.IsMatchingBagItem(sourceItem, pendingPlacement.Payload),
             PendingPlacementSourceKind.InventorySlot => pendingPlacement.SourceSlot >= 0
                 && pendingPlacement.SourceSlot < SlotHelper.MainInventorySlotCount
                 && DB.IsMatchingBagItem(Player.inventory[pendingPlacement.SourceSlot], pendingPlacement.Payload),
             _ => false,
         };
-
-        Mod.Logger.Info($"[DeathBag] TryConsumePendingBagPlacement: payloadMatch={consumed}");
 
         if (!consumed)
             return false;
@@ -131,17 +109,11 @@ public sealed class DeathBagPlayer : ModPlayer
 
         if (pendingPlacement.SourceKind == PendingPlacementSourceKind.Cursor)
         {
-            Mod.Logger.Info($"[DeathBag] TryConsumePendingBagPlacement: clearing cursor item hash={sourceHash}, modHash={sourceModHash}");
-            Item slot58Before = Player.inventory.Length > 58 ? Player.inventory[58] : null;
-            Mod.Logger.Info($"[DeathBag] TryConsumePendingBagPlacement: before clear selectedItem={Player.selectedItem}, mouseType={Main.mouseItem?.type ?? -1}, mouseAir={Main.mouseItem?.IsAir != false}, mouseHash={Main.mouseItem?.GetHashCode() ?? 0}, slot58Type={slot58Before?.type ?? -1}, slot58Air={slot58Before?.IsAir != false}, slot58Hash={slot58Before?.GetHashCode() ?? 0}");
+            Player.inventory[CursorInventorySlot].TurnToAir();
             Main.mouseItem = new Item();
-            Item slot58After = Player.inventory.Length > 58 ? Player.inventory[58] : null;
-            Mod.Logger.Info($"[DeathBag] TryConsumePendingBagPlacement: after clear selectedItem={Player.selectedItem}, mouseType={Main.mouseItem?.type ?? -1}, mouseAir={Main.mouseItem?.IsAir != false}, mouseHash={Main.mouseItem?.GetHashCode() ?? 0}, slot58Type={slot58After?.type ?? -1}, slot58Air={slot58After?.IsAir != false}, slot58Hash={slot58After?.GetHashCode() ?? 0}");
-            _logCursorPlacementStateTicksRemaining = 10;
         }
         else
         {
-            Mod.Logger.Info($"[DeathBag] TryConsumePendingBagPlacement: clearing inventory slot {pendingPlacement.SourceSlot} item hash={sourceHash}, modHash={sourceModHash}");
             Player.inventory[pendingPlacement.SourceSlot].TurnToAir();
         }
 
@@ -433,13 +405,6 @@ public sealed class DeathBagPlayer : ModPlayer
     {
         if (Player.whoAmI != Main.myPlayer)
             return;
-
-        if (_logCursorPlacementStateTicksRemaining > 0)
-        {
-            Item slot58Item = Player.inventory.Length > 58 ? Player.inventory[58] : null;
-            Mod.Logger.Info($"[DeathBag] Post-clear tick: ticksRemaining={_logCursorPlacementStateTicksRemaining}, selectedItem={Player.selectedItem}, mouseType={Main.mouseItem?.type ?? -1}, mouseAir={Main.mouseItem?.IsAir != false}, mouseHash={Main.mouseItem?.GetHashCode() ?? 0}, slot58Type={slot58Item?.type ?? -1}, slot58Air={slot58Item?.IsAir != false}, slot58Hash={slot58Item?.GetHashCode() ?? 0}");
-            _logCursorPlacementStateTicksRemaining--;
-        }
 
         // Safety net: if a bag item ends up in the trash slot, drop it instead.
         // Runs at the start of the tick (before input processing) so there's no
